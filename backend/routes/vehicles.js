@@ -1,0 +1,205 @@
+const express = require('express');
+const Vehicle = require('../models/Vehicle');
+const User = require('../models/User');
+const { authenticate, authorizeRoles } = require('../middleware/auth');
+
+const router = express.Router();
+
+router.use(authenticate, authorizeRoles('admin'));
+
+const toDateOrNull = (value) => value ? new Date(value) : null;
+
+const normalizeVehicleInput = (body) => ({
+  vehicleNumber: body.vehicleNumber?.trim().toUpperCase(),
+  make: body.make?.trim(),
+  name: body.name?.trim(),
+  model: body.model?.trim(),
+  engineCapacity: body.engineCapacity?.trim(),
+  manufacturingYear: body.manufacturingYear ? Number(body.manufacturingYear) : null,
+  status: body.status === 'inactive' ? 'inactive' : 'active',
+  ownership: body.ownership === 'personal' ? 'personal' : 'company',
+  allocatedUser: body.ownership === 'personal' ? (body.allocatedUser || null) : null,
+  allocatedDrivers: body.ownership === 'personal' ? [] : (Array.isArray(body.allocatedDrivers) ? body.allocatedDrivers.filter(Boolean) : []),
+  dateOfPurchasing: toDateOrNull(body.dateOfPurchasing),
+  dateOfUserAllocation: toDateOrNull(body.dateOfUserAllocation)
+});
+
+const validateVehicle = async (payload) => {
+  if (!payload.vehicleNumber || !payload.make || !payload.name || !payload.model || !payload.engineCapacity || !payload.manufacturingYear) {
+    return 'Vehicle number, make, name, model, engine capacity, and manufacturing year are required';
+  }
+
+  if (payload.manufacturingYear < 1900 || payload.manufacturingYear > 2100) {
+    return 'Please enter a valid manufacturing year';
+  }
+
+  if (payload.ownership === 'personal' && payload.allocatedUser) {
+    const user = await User.findById(payload.allocatedUser).select('role isActive');
+
+    if (!user || !user.isActive || user.role !== 'user') {
+      return 'Allocated user must be an active user-role account';
+    }
+  }
+
+  if (payload.ownership === 'company' && payload.allocatedDrivers.length > 0) {
+    const drivers = await User.find({
+      _id: { $in: payload.allocatedDrivers },
+      role: 'driver',
+      isActive: true
+    }).select('_id');
+
+    if (drivers.length !== payload.allocatedDrivers.length) {
+      return 'Allocated drivers must be active driver-role accounts';
+    }
+  }
+
+  return null;
+};
+
+const syncUserVehicleAssignment = async (oldUserId, newUserId, vehicleNumber) => {
+  if (oldUserId && oldUserId.toString() !== newUserId?.toString()) {
+    await User.findByIdAndUpdate(oldUserId, { $set: { vehicleId: '' } });
+  }
+
+  if (newUserId) {
+    await User.findByIdAndUpdate(newUserId, { $set: { vehicleId: vehicleNumber } });
+  }
+};
+
+const populateVehicle = (query) => query
+  .populate('allocatedUser', 'name username employeeId role email')
+  .populate('allocatedDrivers', 'name username employeeId role contactNumber');
+
+router.get('/', async (req, res) => {
+  try {
+    const search = req.query.search?.trim();
+    const filter = search
+      ? {
+          $or: [
+            { vehicleNumber: new RegExp(search, 'i') },
+            { make: new RegExp(search, 'i') },
+            { name: new RegExp(search, 'i') },
+            { model: new RegExp(search, 'i') },
+            { engineCapacity: new RegExp(search, 'i') },
+            { status: new RegExp(search, 'i') },
+            { ownership: new RegExp(search, 'i') }
+          ]
+        }
+      : {};
+
+    const vehicles = await populateVehicle(
+      Vehicle.find(filter).sort({ createdAt: -1 }).select('-__v')
+    );
+
+    res.json(vehicles);
+  } catch (error) {
+    console.error('Vehicle list error:', error);
+    res.status(500).json({ error: 'Failed to load vehicles' });
+  }
+});
+
+router.get('/:id', async (req, res) => {
+  try {
+    const vehicle = await populateVehicle(Vehicle.findById(req.params.id).select('-__v'));
+
+    if (!vehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+
+    res.json(vehicle);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to load vehicle' });
+  }
+});
+
+router.post('/', async (req, res) => {
+  try {
+    const payload = normalizeVehicleInput(req.body);
+    const validationError = await validateVehicle(payload);
+
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const hasAllocation = payload.allocatedUser || payload.allocatedDrivers.length > 0;
+
+    if (hasAllocation && !payload.dateOfUserAllocation) {
+      payload.dateOfUserAllocation = new Date();
+    }
+
+    const vehicle = await Vehicle.create(payload);
+    await syncUserVehicleAssignment(null, vehicle.allocatedUser, vehicle.vehicleNumber);
+
+    const populated = await populateVehicle(Vehicle.findById(vehicle._id).select('-__v'));
+    res.status(201).json(populated);
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Vehicle number already exists' });
+    }
+
+    console.error('Vehicle create error:', error);
+    res.status(500).json({ error: 'Failed to create vehicle' });
+  }
+});
+
+router.put('/:id', async (req, res) => {
+  try {
+    const existingVehicle = await Vehicle.findById(req.params.id);
+
+    if (!existingVehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+
+    const payload = normalizeVehicleInput(req.body);
+    const validationError = await validateVehicle(payload);
+
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const hasAllocation = payload.allocatedUser || payload.allocatedDrivers.length > 0;
+
+    if (hasAllocation && !payload.dateOfUserAllocation) {
+      payload.dateOfUserAllocation = existingVehicle.dateOfUserAllocation || new Date();
+    }
+
+    if (!hasAllocation) {
+      payload.dateOfUserAllocation = null;
+    }
+
+    const vehicle = await Vehicle.findByIdAndUpdate(
+      req.params.id,
+      payload,
+      { new: true, runValidators: true }
+    ).select('-__v');
+
+    await syncUserVehicleAssignment(existingVehicle.allocatedUser, vehicle.allocatedUser, vehicle.vehicleNumber);
+
+    const populated = await populateVehicle(Vehicle.findById(vehicle._id).select('-__v'));
+    res.json(populated);
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Vehicle number already exists' });
+    }
+
+    console.error('Vehicle update error:', error);
+    res.status(500).json({ error: 'Failed to update vehicle' });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const vehicle = await Vehicle.findByIdAndDelete(req.params.id);
+
+    if (!vehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+
+    await syncUserVehicleAssignment(vehicle.allocatedUser, null, vehicle.vehicleNumber);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete vehicle' });
+  }
+});
+
+module.exports = router;

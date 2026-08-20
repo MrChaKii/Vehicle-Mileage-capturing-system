@@ -1,9 +1,7 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import axios from 'axios';
+import { useState, useRef, useEffect } from 'react';
+import api from '../api';
 
-const API_URL = 'http://localhost:5000/api';
-
-const MeterCapture = ({ vehicleId, userId }) => {
+const MeterCapture = ({ vehicleId }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -79,7 +77,7 @@ const MeterCapture = ({ vehicleId, userId }) => {
     data.append('meterImage', capturedImage, 'meter.jpg');
 
     try {
-      const res = await axios.post(`${API_URL}/readings/extract`, data, {
+      const res = await api.post('/readings/extract', data, {
         headers: { 'Content-Type': 'multipart/form-data' },
         timeout: 35000
       });
@@ -117,7 +115,6 @@ const MeterCapture = ({ vehicleId, userId }) => {
         confidence: formData.confidence,
         isCorrected,
         originalMileage: formData.originalMileage,
-        submittedBy: userId,
         location: null
       };
 
@@ -133,7 +130,7 @@ const MeterCapture = ({ vehicleId, userId }) => {
         );
       }
 
-      await axios.post(`${API_URL}/readings`, payload);
+      await api.post('/readings', payload);
       
       setSuccess(true);
       setTimeout(() => {
