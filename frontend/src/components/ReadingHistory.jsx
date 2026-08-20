@@ -1,23 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-
-const API_URL = 'http://localhost:5000/api';
+import { useState, useEffect } from 'react';
+import api from '../api';
 
 const ReadingHistory = ({ vehicleId }) => {
   const [readings, setReadings] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, [vehicleId]);
-
   const fetchData = async () => {
     setLoading(true);
     try {
       const [readingsRes, statsRes] = await Promise.all([
-        axios.get(`${API_URL}/readings/${vehicleId}`),
-        axios.get(`${API_URL}/readings/stats/${vehicleId}`).catch(() => ({ data: null }))
+        api.get(`/readings/${vehicleId}`),
+        api.get(`/readings/stats/${vehicleId}`).catch(() => ({ data: null }))
       ]);
       setReadings(readingsRes.data);
       setStats(statsRes.data);
@@ -27,6 +21,38 @@ const ReadingHistory = ({ vehicleId }) => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadInitialData = async () => {
+      try {
+        const [readingsRes, statsRes] = await Promise.all([
+          api.get(`/readings/${vehicleId}`),
+          api.get(`/readings/stats/${vehicleId}`).catch(() => ({ data: null }))
+        ]);
+
+        if (!isActive) {
+          return;
+        }
+
+        setReadings(readingsRes.data);
+        setStats(statsRes.data);
+      } catch (err) {
+        console.error('Failed to fetch history', err);
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadInitialData();
+
+    return () => {
+      isActive = false;
+    };
+  }, [vehicleId]);
 
   if (loading) {
     return (

@@ -4,11 +4,14 @@ const multer = require('multer');
 const axios = require('axios');
 const FormData = require('form-data');
 const Reading = require('../models/Reading');
+const { authenticate } = require('../middleware/auth');
 
 // CRITICAL: Store file in memory only, never on disk
 const upload = multer({ storage: multer.memoryStorage() });
 
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
+
+router.use(authenticate);
 
 // POST /api/readings/extract — Analyze image, return data, DON'T save yet
 router.post('/extract', upload.single('meterImage'), async (req, res) => {
@@ -62,7 +65,7 @@ router.post('/extract', upload.single('meterImage'), async (req, res) => {
 // POST /api/readings — Save after user confirms/corrects
 router.post('/', async (req, res) => {
   try {
-    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location, submittedBy } = req.body;
+    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location } = req.body;
 
     if (!vehicleId || mileage === undefined) {
       return res.status(400).json({ error: 'vehicleId and mileage are required' });
@@ -86,7 +89,7 @@ router.post('/', async (req, res) => {
       isCorrected: isCorrected || false,
       originalMileage: originalMileage || null,
       location,
-      submittedBy
+      submittedBy: req.user._id.toString()
     });
 
     await reading.save();
