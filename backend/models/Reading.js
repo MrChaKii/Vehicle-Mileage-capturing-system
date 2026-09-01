@@ -42,6 +42,10 @@ const readingSchema = new mongoose.Schema({
   submittedBy: {
     type: String,  // or ObjectId if you have auth
     required: true
+  },
+  driverName: {
+    type: String,
+    default: ''
   }
 }, { timestamps: true });
 

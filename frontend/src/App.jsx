@@ -6,6 +6,7 @@ import EmployeeManagement from './components/EmployeeManagement';
 import LoginPage from './components/LoginPage';
 import MeterCapture from './components/MeterCapture';
 import ReadingHistory from './components/ReadingHistory';
+import ReadingsAdmin from './components/ReadingsAdmin';
 import VehicleManagement from './components/VehicleManagement';
 
 const adminNavItems = [
@@ -43,6 +44,15 @@ const adminNavItems = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 10-8 0v4M5 11h14l-1 9H6l-1-9z" />
+      </svg>
+    )
+  },
+  {
+    id: 'readings',
+    label: 'Readings',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
       </svg>
     )
   }
@@ -86,6 +96,14 @@ function App() {
   const [adminPage, setAdminPage] = useState('dashboard');
   const [selectedVehicleNumber, setSelectedVehicleNumber] = useState('');
 
+  // Driver login: vehicle & driver name dropdowns
+  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [] });
+  const [driverOptionsLoaded, setDriverOptionsLoaded] = useState(false);
+  const [selectedDriverVehicle, setSelectedDriverVehicle] = useState('');
+  const [selectedDriverName, setSelectedDriverName] = useState('');
+  const [driverSelectionConfirmed, setDriverSelectionConfirmed] = useState(false);
+  const [driverOptionsError, setDriverOptionsError] = useState(null);
+
   useEffect(() => {
     const loadSession = async () => {
       const token = localStorage.getItem('authToken');
@@ -108,11 +126,31 @@ function App() {
     loadSession();
   }, []);
 
+  // Auto-load vehicle & driver name options when a driver logs in
+  useEffect(() => {
+    if (!user || user.role !== 'driver') return;
+    const loadOptions = async () => {
+      setDriverOptionsError(null);
+      try {
+        const res = await api.get('/readings/options');
+        setDriverOptions(res.data);
+        setDriverOptionsLoaded(true);
+      } catch {
+        setDriverOptionsError('Failed to load options. Please retry.');
+      }
+    };
+    loadOptions();
+  }, [user]);
+
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     setUser(null);
     setAdminPage('dashboard');
     setSelectedVehicleNumber('');
+    setSelectedDriverVehicle('');
+    setSelectedDriverName('');
+    setDriverSelectionConfirmed(false);
+    setDriverOptionsLoaded(false);
   };
 
   if (!authChecked) {
@@ -128,6 +166,7 @@ function App() {
   }
 
   const isAdmin = user.role === 'admin';
+  const isDriver = user.role === 'driver';
   const userVehicleOptions = getUserVehicleOptions(user);
   const selectedVehicleIsAssigned = userVehicleOptions.some(vehicle => vehicle.vehicleNumber === selectedVehicleNumber);
   const assignedVehicle = selectedVehicleIsAssigned
@@ -209,11 +248,152 @@ function App() {
                   <CompanyDriverManagement />
                 ) : adminPage === 'employees' ? (
                   <EmployeeManagement />
+                ) : adminPage === 'readings' ? (
+                  <ReadingsAdmin />
                 ) : (
                   <AdminDashboard />
                 )}
               </div>
             </section>
+          </div>
+        ) : isDriver ? (
+          // ── Driver login workspace ─────────────────────────────────────
+          <div className="space-y-6">
+            {/* Step 1: Vehicle + Driver Name selection */}
+            {!driverSelectionConfirmed ? (
+              <div className="max-w-xl mx-auto mt-8">
+                <div className="card space-y-6">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Driver Workspace</p>
+                    <h2 className="text-xl font-bold text-slate-900">Before You Scan</h2>
+                    <p className="text-sm text-slate-500 mt-1">Select your vehicle and name to continue.</p>
+                  </div>
+
+                  {/* Loading state */}
+                  {!driverOptionsLoaded && !driverOptionsError && (
+                    <div className="flex items-center gap-3 py-2 text-slate-500">
+                      <svg className="animate-spin h-5 w-5 text-brand-500" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span className="text-sm">Loading options...</span>
+                    </div>
+                  )}
+
+                  {driverOptionsError && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{driverOptionsError}</p>
+                      <button
+                        onClick={async () => {
+                          setDriverOptionsError(null);
+                          try {
+                            const res = await api.get('/readings/options');
+                            setDriverOptions(res.data);
+                            setDriverOptionsLoaded(true);
+                          } catch {
+                            setDriverOptionsError('Failed to load options. Please try again.');
+                          }
+                        }}
+                        className="btn-secondary w-full text-sm"
+                      >
+                        ↺ Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {driverOptionsLoaded && (
+                    <>
+                      {/* Vehicle dropdown */}
+                      <div>
+                        <label htmlFor="driverVehicleSelect" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                          Vehicle <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          id="driverVehicleSelect"
+                          value={selectedDriverVehicle}
+                          onChange={e => setSelectedDriverVehicle(e.target.value)}
+                          className="input"
+                        >
+                          <option value="">— Select a vehicle —</option>
+                          {driverOptions.vehicles.map(v => (
+                            <option key={v._id} value={v.vehicleNumber}>
+                              {v.vehicleNumber}{v.make || v.name ? ` — ${[v.make, v.name, v.model].filter(Boolean).join(' ')}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Driver Name dropdown */}
+                      <div>
+                        <label htmlFor="driverNameSelect" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                          Driver Name <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          id="driverNameSelect"
+                          value={selectedDriverName}
+                          onChange={e => setSelectedDriverName(e.target.value)}
+                          className="input"
+                        >
+                          <option value="">— Select your name —</option>
+                          {driverOptions.companyDrivers.map(d => (
+                            <option key={d._id} value={d.employeeName}>
+                              {d.employeeId} — {d.employeeName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (!selectedDriverVehicle || !selectedDriverName) return;
+                          setDriverSelectionConfirmed(true);
+                        }}
+                        disabled={!selectedDriverVehicle || !selectedDriverName}
+                        className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ✓ Confirm &amp; Proceed to Scan
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              // Step 2: Odometer scan
+              <div className="space-y-6">
+                <div className="card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Driver Workspace</p>
+                    <h2 className="text-xl font-bold text-slate-900 mt-1">{selectedDriverVehicle}</h2>
+                    <p className="text-sm text-slate-500 mt-1">Driver: {selectedDriverName}</p>
+                  </div>
+                  <button
+                    onClick={() => setDriverSelectionConfirmed(false)}
+                    className="btn-secondary text-sm px-3 py-1.5"
+                  >
+                    ✎ Change Selection
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" />
+                      <h2 className="text-lg font-semibold text-slate-900">New Reading</h2>
+                    </div>
+                    <MeterCapture
+                      key={`capture-driver-${selectedDriverVehicle}`}
+                      vehicleId={selectedDriverVehicle}
+                      driverName={selectedDriverName}
+                    />
+                  </div>
+
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900 mb-4">History &amp; Stats</h2>
+                    <ReadingHistory key={`history-driver-${selectedDriverVehicle}`} vehicleId={selectedDriverVehicle} />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ) : assignedVehicle ? (
           <div className="space-y-6">
