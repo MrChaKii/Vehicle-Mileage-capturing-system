@@ -4,6 +4,8 @@ const multer = require('multer');
 const axios = require('axios');
 const FormData = require('form-data');
 const Reading = require('../models/Reading');
+const Vehicle = require('../models/Vehicle');
+const CompanyDriver = require('../models/CompanyDriver');
 const { authenticate } = require('../middleware/auth');
 
 // CRITICAL: Store file in memory only, never on disk
@@ -12,6 +14,21 @@ const upload = multer({ storage: multer.memoryStorage() });
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
 
 router.use(authenticate);
+
+// GET /api/readings/options — Return vehicles and company drivers for driver login dropdowns
+router.get('/options', async (req, res) => {
+  try {
+    const [vehicles, companyDrivers] = await Promise.all([
+      Vehicle.find({ status: 'active' }).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership'),
+      CompanyDriver.find().sort({ employeeName: 1 }).select('employeeId employeeName')
+    ]);
+
+    res.json({ vehicles, companyDrivers });
+  } catch (error) {
+    console.error('Options load error:', error);
+    res.status(500).json({ error: 'Failed to load options' });
+  }
+});
 
 // POST /api/readings/extract — Analyze image, return data, DON'T save yet
 router.post('/extract', upload.single('meterImage'), async (req, res) => {
@@ -65,7 +82,7 @@ router.post('/extract', upload.single('meterImage'), async (req, res) => {
 // POST /api/readings — Save after user confirms/corrects
 router.post('/', async (req, res) => {
   try {
-    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location } = req.body;
+    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location, driverName } = req.body;
 
     if (!vehicleId || mileage === undefined) {
       return res.status(400).json({ error: 'vehicleId and mileage are required' });
@@ -89,7 +106,8 @@ router.post('/', async (req, res) => {
       isCorrected: isCorrected || false,
       originalMileage: originalMileage || null,
       location,
-      submittedBy: req.user._id.toString()
+      submittedBy: req.user._id.toString(),
+      driverName: driverName || ''
     });
 
     await reading.save();
@@ -107,6 +125,49 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Save error:', error);
     res.status(500).json({ error: 'Failed to save reading' });
+  }
+});
+
+// GET /api/readings — All readings (admin, filterable + paginated)
+router.get('/', async (req, res) => {
+  try {
+    const { vehicleId, driverName, startDate, endDate, page = 1 } = req.query;
+    const PAGE_SIZE = 50;
+
+    const filter = {};
+    if (vehicleId) filter.vehicleId = { $regex: vehicleId.trim(), $options: 'i' };
+    if (driverName) filter.driverName = { $regex: driverName.trim(), $options: 'i' };
+    if (startDate || endDate) {
+      filter.readingDate = {};
+      if (startDate) filter.readingDate.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.readingDate.$lte = end;
+      }
+    }
+
+    const skip = (parseInt(page, 10) - 1) * PAGE_SIZE;
+
+    const [readings, total] = await Promise.all([
+      Reading.find(filter)
+        .sort({ readingDate: -1 })
+        .skip(skip)
+        .limit(PAGE_SIZE)
+        .select('-__v'),
+      Reading.countDocuments(filter)
+    ]);
+
+    res.json({
+      readings,
+      total,
+      page: parseInt(page, 10),
+      pages: Math.ceil(total / PAGE_SIZE),
+      pageSize: PAGE_SIZE
+    });
+  } catch (error) {
+    console.error('Admin readings list error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

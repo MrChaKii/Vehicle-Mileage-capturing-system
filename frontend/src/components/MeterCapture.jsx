@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import api from '../api';
 
-const MeterCapture = ({ vehicleId }) => {
+const MeterCapture = ({ vehicleId, driverName }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -115,7 +115,8 @@ const MeterCapture = ({ vehicleId }) => {
         confidence: formData.confidence,
         isCorrected,
         originalMileage: formData.originalMileage,
-        location: null
+        location: null,
+        driverName: driverName || ''
       };
 
       if (navigator.geolocation) {
