@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Vehicle = require('../models/Vehicle');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 const { hashPassword } = require('../utils/password');
+const { usernameFromEmployeeId, usernameFromVehicleNumber } = require('../utils/usernames');
 
 const router = express.Router();
 
@@ -26,7 +27,10 @@ const toPublicUser = (user, assignedVehicles = []) => ({
 const normalizeUserInput = (body) => {
   const role = ['admin', 'driver'].includes(body.role) ? body.role : 'user';
   const employeeId = body.employeeId?.trim().toUpperCase() || '';
-  const username = body.username?.trim().toLowerCase();
+  const vehicleId = role === 'user' ? (body.vehicleId?.trim().toUpperCase() || '') : '';
+  const username = role === 'user'
+    ? (vehicleId ? usernameFromVehicleNumber(vehicleId) : usernameFromEmployeeId(employeeId))
+    : body.username?.trim().toLowerCase();
   const email = body.email?.trim().toLowerCase();
 
   return {
@@ -36,7 +40,7 @@ const normalizeUserInput = (body) => {
     username,
     contactNumber: body.contactNumber?.trim() || '',
     role,
-    vehicleId: role === 'user' ? (body.vehicleId?.trim().toUpperCase() || '') : '',
+    vehicleId,
     isActive: body.isActive !== false
   };
 };
