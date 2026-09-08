@@ -134,12 +134,6 @@ const ReadingsAdmin = () => {
     }
   }, [buildParams]);
 
-  // Initial fetch
-  useEffect(() => {
-    fetchReadings(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Debounced re-fetch when filters change
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);

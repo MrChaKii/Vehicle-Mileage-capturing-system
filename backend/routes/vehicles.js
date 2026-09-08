@@ -2,6 +2,7 @@ const express = require('express');
 const Vehicle = require('../models/Vehicle');
 const User = require('../models/User');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
+const { usernameFromEmployeeId, usernameFromVehicleNumber } = require('../utils/usernames');
 
 const router = express.Router();
 
@@ -24,7 +25,7 @@ const normalizeVehicleInput = (body) => ({
   dateOfUserAllocation: toDateOrNull(body.dateOfUserAllocation)
 });
 
-const validateVehicle = async (payload) => {
+const validateVehicle = async (payload, validateAllocation = true) => {
   if (!payload.vehicleNumber || !payload.make || !payload.name || !payload.model || !payload.engineCapacity || !payload.manufacturingYear) {
     return 'Vehicle number, make, name, model, engine capacity, and manufacturing year are required';
   }
@@ -33,11 +34,30 @@ const validateVehicle = async (payload) => {
     return 'Please enter a valid manufacturing year';
   }
 
+  if (!validateAllocation) {
+    return null;
+  }
+
   if (payload.ownership === 'personal' && payload.allocatedUser) {
     const user = await User.findById(payload.allocatedUser).select('role isActive');
 
     if (!user || !user.isActive || user.role !== 'user') {
       return 'Allocated user must be an active user-role account';
+    }
+
+    const generatedUsername = usernameFromVehicleNumber(payload.vehicleNumber);
+
+    if (!generatedUsername) {
+      return 'Vehicle number must contain at least one letter or number';
+    }
+
+    const usernameOwner = await User.findOne({
+      username: generatedUsername,
+      _id: { $ne: payload.allocatedUser }
+    }).select('_id');
+
+    if (usernameOwner) {
+      return `Generated username "${generatedUsername}" is already used by another account`;
     }
   }
 
@@ -56,19 +76,43 @@ const validateVehicle = async (payload) => {
   return null;
 };
 
+const allocationEntries = (ownership, allocatedUser, allocatedDrivers, assignedAt) => {
+  if (ownership === 'personal') {
+    return allocatedUser
+      ? [{ user: allocatedUser, allocationType: 'user', assignedAt }]
+      : [];
+  }
+
+  return allocatedDrivers.map(user => ({ user, allocationType: 'driver', assignedAt }));
+};
+
+const sameId = (left, right) => left?.toString() === right?.toString();
+
 const syncUserVehicleAssignment = async (oldUserId, newUserId, vehicleNumber) => {
   if (oldUserId && oldUserId.toString() !== newUserId?.toString()) {
-    await User.findByIdAndUpdate(oldUserId, { $set: { vehicleId: '' } });
+    const oldUser = await User.findById(oldUserId).select('employeeId');
+    await User.findByIdAndUpdate(oldUserId, {
+      $set: {
+        vehicleId: '',
+        username: usernameFromEmployeeId(oldUser?.employeeId || oldUserId)
+      }
+    }, { runValidators: true });
   }
 
   if (newUserId) {
-    await User.findByIdAndUpdate(newUserId, { $set: { vehicleId: vehicleNumber } });
+    await User.findByIdAndUpdate(newUserId, {
+      $set: {
+        vehicleId: vehicleNumber,
+        username: usernameFromVehicleNumber(vehicleNumber)
+      }
+    }, { runValidators: true });
   }
 };
 
 const populateVehicle = (query) => query
   .populate('allocatedUser', 'name username employeeId role email')
-  .populate('allocatedDrivers', 'name username employeeId role contactNumber');
+  .populate('allocatedDrivers', 'name username employeeId role contactNumber')
+  .populate('allocationHistory.user', 'name username employeeId role');
 
 router.get('/', async (req, res) => {
   try {
@@ -127,6 +171,13 @@ router.post('/', async (req, res) => {
       payload.dateOfUserAllocation = new Date();
     }
 
+    payload.allocationHistory = allocationEntries(
+      payload.ownership,
+      payload.allocatedUser,
+      payload.allocatedDrivers,
+      payload.dateOfUserAllocation || new Date()
+    );
+
     const vehicle = await Vehicle.create(payload);
     await syncUserVehicleAssignment(null, vehicle.allocatedUser, vehicle.vehicleNumber);
 
@@ -151,20 +202,15 @@ router.put('/:id', async (req, res) => {
     }
 
     const payload = normalizeVehicleInput(req.body);
-    const validationError = await validateVehicle(payload);
+    payload.ownership = existingVehicle.ownership;
+    payload.allocatedUser = existingVehicle.allocatedUser;
+    payload.allocatedDrivers = existingVehicle.allocatedDrivers;
+    payload.dateOfUserAllocation = existingVehicle.dateOfUserAllocation;
+
+    const validationError = await validateVehicle(payload, false);
 
     if (validationError) {
       return res.status(400).json({ error: validationError });
-    }
-
-    const hasAllocation = payload.allocatedUser || payload.allocatedDrivers.length > 0;
-
-    if (hasAllocation && !payload.dateOfUserAllocation) {
-      payload.dateOfUserAllocation = existingVehicle.dateOfUserAllocation || new Date();
-    }
-
-    if (!hasAllocation) {
-      payload.dateOfUserAllocation = null;
     }
 
     const vehicle = await Vehicle.findByIdAndUpdate(
@@ -184,6 +230,88 @@ router.put('/:id', async (req, res) => {
 
     console.error('Vehicle update error:', error);
     res.status(500).json({ error: 'Failed to update vehicle' });
+  }
+});
+
+router.patch('/:id/assignment', async (req, res) => {
+  try {
+    const vehicle = await Vehicle.findById(req.params.id);
+
+    if (!vehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+
+    const payload = {
+      ownership: vehicle.ownership,
+      allocatedUser: vehicle.ownership === 'personal' ? (req.body.allocatedUser || null) : null,
+      allocatedDrivers: vehicle.ownership === 'company'
+        ? [...new Set(Array.isArray(req.body.allocatedDrivers) ? req.body.allocatedDrivers.filter(Boolean) : [])]
+        : []
+    };
+    const validationError = await validateVehicle({
+      ...vehicle.toObject(),
+      ...payload
+    });
+
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const currentEntries = allocationEntries(
+      vehicle.ownership,
+      vehicle.allocatedUser,
+      vehicle.allocatedDrivers,
+      null
+    );
+    const nextEntries = allocationEntries(
+      payload.ownership,
+      payload.allocatedUser,
+      payload.allocatedDrivers,
+      null
+    );
+    const hasChanged = currentEntries.length !== nextEntries.length || currentEntries.some(current => !nextEntries.some(next => (
+      current.allocationType === next.allocationType && sameId(current.user, next.user)
+    )));
+
+    if (!hasChanged) {
+      const populated = await populateVehicle(Vehicle.findById(vehicle._id).select('-__v'));
+      return res.json(populated);
+    }
+
+    const assignedAt = new Date();
+    const removedEntries = currentEntries.filter(current => !nextEntries.some(next => (
+      current.allocationType === next.allocationType && sameId(current.user, next.user)
+    )));
+    const addedEntries = nextEntries.filter(next => !currentEntries.some(current => (
+      current.allocationType === next.allocationType && sameId(current.user, next.user)
+    )));
+
+    vehicle.allocationHistory.forEach(entry => {
+      const isRemoved = removedEntries.some(removed => (
+        removed.allocationType === entry.allocationType && sameId(removed.user, entry.user)
+      ));
+
+      if (isRemoved && !entry.unassignedAt) {
+        entry.unassignedAt = assignedAt;
+      }
+    });
+    vehicle.allocationHistory.push(...addedEntries.map(entry => ({ ...entry, assignedAt })));
+    vehicle.allocatedUser = payload.allocatedUser;
+    vehicle.allocatedDrivers = payload.allocatedDrivers;
+    vehicle.dateOfUserAllocation = nextEntries.length ? assignedAt : null;
+    await vehicle.save();
+
+    await syncUserVehicleAssignment(
+      vehicle.ownership === 'personal' ? currentEntries[0]?.user : null,
+      vehicle.ownership === 'personal' ? payload.allocatedUser : null,
+      vehicle.vehicleNumber
+    );
+
+    const populated = await populateVehicle(Vehicle.findById(vehicle._id).select('-__v'));
+    res.json(populated);
+  } catch (error) {
+    console.error('Vehicle assignment change error:', error);
+    res.status(500).json({ error: 'Failed to change vehicle user' });
   }
 });
 

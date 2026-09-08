@@ -61,9 +61,28 @@ const vehicleSchema = new mongoose.Schema({
   dateOfUserAllocation: {
     type: Date,
     default: null
-  }
+  },
+  allocationHistory: [{
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    allocationType: {
+      type: String,
+      enum: ['user', 'driver'],
+      required: true
+    },
+    assignedAt: {
+      type: Date,
+      required: true
+    },
+    unassignedAt: {
+      type: Date,
+      default: null
+    }
+  }]
 }, { timestamps: true });
-
 vehicleSchema.index({ vehicleNumber: 'text', make: 'text', name: 'text', model: 'text' });
 
 module.exports = mongoose.model('Vehicle', vehicleSchema);

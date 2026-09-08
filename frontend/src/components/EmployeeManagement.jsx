@@ -39,6 +39,11 @@ const getAssignedVehicleText = (user) => {
   return [];
 };
 
+const getGeneratedUserUsername = (data) => {
+  const source = data.vehicleId || data.employeeId;
+  return source.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+};
+
 const EmployeeManagement = () => {
   const [users, setUsers] = useState([]);
   const [formData, setFormData] = useState(emptyForm);
@@ -123,6 +128,7 @@ const EmployeeManagement = () => {
       const payload = {
         ...formData,
         email: formData.role === 'driver' ? '' : formData.email,
+        username: formData.role === 'user' ? '' : formData.username,
         vehicleId: formData.role === 'user' ? formData.vehicleId : ''
       };
 
@@ -384,17 +390,30 @@ const EmployeeManagement = () => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
-                  <input
-                    type="text"
-                    value={formData.username}
-                    onChange={(e) => handleChange('username', e.target.value)}
-                    className="input lowercase"
-                    placeholder="username"
-                    required
-                  />
-                </div>
+                {formData.role === 'user' ? (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
+                    <input
+                      type="text"
+                      value={getGeneratedUserUsername(formData)}
+                      className="input bg-slate-100 text-slate-500 cursor-not-allowed"
+                      placeholder="Auto generated"
+                      disabled
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
+                    <input
+                      type="text"
+                      value={formData.username}
+                      onChange={(e) => handleChange('username', e.target.value)}
+                      className="input lowercase"
+                      placeholder="username"
+                      required
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Contact Number</label>

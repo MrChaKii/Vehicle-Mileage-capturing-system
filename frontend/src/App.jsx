@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from './api';
 import AdminDashboard from './components/AdminDashboard';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
 import CompanyDriverManagement from './components/CompanyDriverManagement';
 import EmployeeManagement from './components/EmployeeManagement';
 import LoginPage from './components/LoginPage';
@@ -16,6 +17,15 @@ const adminNavItems = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 13h6V4H4v9zm10 7h6V4h-6v16zM4 20h6v-5H4v5z" />
+      </svg>
+    )
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3v18h18M7 15l3-3 3 2 5-7" />
       </svg>
     )
   },
@@ -248,6 +258,8 @@ function App() {
                   <CompanyDriverManagement />
                 ) : adminPage === 'employees' ? (
                   <EmployeeManagement />
+                ) : adminPage === 'analytics' ? (
+                  <AnalyticsDashboard />
                 ) : adminPage === 'readings' ? (
                   <ReadingsAdmin />
                 ) : (
