@@ -6,7 +6,7 @@ const { hashPassword } = require('../utils/password');
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('admin'));
+router.use(authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'));
 
 const toPublicUser = (user, assignedVehicles = []) => ({
   id: user._id,
@@ -23,8 +23,12 @@ const toPublicUser = (user, assignedVehicles = []) => ({
   createdAt: user.createdAt
 });
 
+const SUPERADMIN_ROLES = ['superadmin', 'super_admin', 'super admin', 'super-admin'];
+
+const isSuperadmin = (role) => SUPERADMIN_ROLES.includes(role);
+
 const normalizeUserInput = (body, existingUser = null) => {
-  const role = ['admin', 'driver'].includes(body.role) ? body.role : 'user';
+  const role = ['admin', 'superadmin', 'super_admin', 'super admin', 'super-admin', 'driver'].includes(body.role) ? body.role : 'user';
   const employeeId = body.employeeId?.trim().toUpperCase() || '';
   const username = role === 'user'
     ? (existingUser?.role === 'user' ? existingUser.username : 'non')
@@ -203,6 +207,10 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    if (isSuperadmin(existingUser.role) && !isSuperadmin(req.user.role)) {
+      return res.status(403).json({ error: 'Super admin details cannot be edited by an admin' });
+    }
+
     const payload = normalizeUserInput(req.body, existingUser);
     const validationError = validateUser(payload, req.body.password, true);
 
@@ -245,11 +253,17 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ error: 'You cannot delete your own account' });
     }
 
-    const user = await User.findByIdAndDelete(req.params.id);
+    const user = await User.findById(req.params.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+
+    if (['superadmin', 'super_admin', 'super admin', 'super-admin'].includes(user.role)) {
+      return res.status(400).json({ error: 'Super admin users cannot be deleted' });
+    }
+
+    await User.findByIdAndDelete(req.params.id);
 
     res.json({ success: true });
   } catch (error) {

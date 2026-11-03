@@ -6,7 +6,7 @@ const { usernameFromVehicleNumber } = require('../utils/usernames');
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('admin'));
+router.use(authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'));
 
 const fuelTypes = ['petrol', 'diesel', 'hybrid', 'electric'];
 
@@ -32,6 +32,7 @@ const normalizeVehicleInput = (body) => {
     manufacturingYear: body.manufacturingYear ? Number(body.manufacturingYear) : null,
     status: body.status === 'inactive' ? 'inactive' : 'active',
     ownership,
+    division: body.division || null,
     allocatedUser: body.allocatedUser || null,
     allocatedDrivers: [],
     dateOfPurchasing: toDateOrNull(body.dateOfPurchasing),
@@ -99,7 +100,7 @@ const validateVehicle = async (
   if (payload.ownership === 'pool' && payload.allocatedUser) {
     const user = await User.findById(payload.allocatedUser).select('role isActive');
 
-    if (!user || !user.isActive || user.role === 'admin') {
+    if (!user || !user.isActive || ['admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'].includes(user.role)) {
       return 'Pool vehicles can only be allocated to an active non-admin user';
     }
   }
@@ -154,7 +155,8 @@ const syncUserVehicleAssignment = async (oldUserId, newUserId, vehicleNumber) =>
 const populateVehicle = (query) => query
   .populate('allocatedUser', 'name username employeeId role email')
   .populate('allocatedDrivers', 'name username employeeId role contactNumber')
-  .populate('allocationHistory.user', 'name username employeeId role');
+  .populate('allocationHistory.user', 'name username employeeId role')
+  .populate('division', 'name code');
 
 router.get('/', async (req, res) => {
   try {

@@ -273,7 +273,7 @@ router.get('/stats/:vehicleId', async (req, res) => {
 });
 
 // PUT /api/readings/:id — Admin can correct only the saved mileage value
-router.put('/:id', authenticate, authorizeRoles('admin'), async (req, res) => {
+router.put('/:id', authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'), async (req, res) => {
   try {
     const mileage = Number(req.body.mileage);
 
@@ -305,7 +305,7 @@ router.put('/:id', authenticate, authorizeRoles('admin'), async (req, res) => {
 });
 
 // DELETE /api/readings/:id — Admin can remove an incorrect reading
-router.delete('/:id', authenticate, authorizeRoles('admin'), async (req, res) => {
+router.delete('/:id', authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'), async (req, res) => {
   try {
     const reading = await Reading.findByIdAndDelete(req.params.id);
 

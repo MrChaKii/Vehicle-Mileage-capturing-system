@@ -14,6 +14,10 @@ const emptyForm = {
 
 const roleBadgeClass = {
   admin: 'bg-brand-100 text-brand-700',
+  superadmin: 'bg-purple-100 text-purple-700',
+  super_admin: 'bg-purple-100 text-purple-700',
+  'super admin': 'bg-purple-100 text-purple-700',
+  'super-admin': 'bg-purple-100 text-purple-700',
   employee: 'bg-emerald-100 text-emerald-700',
   user: 'bg-slate-100 text-slate-700',
   driver: 'bg-amber-100 text-amber-700'
@@ -39,8 +43,13 @@ const getAssignedVehicleText = (user) => {
   return [];
 };
 
+const SUPERADMIN_ROLES = ['superadmin', 'super_admin', 'super admin', 'super-admin'];
+
+const isSuperadmin = (role) => SUPERADMIN_ROLES.includes(role);
+
 const EmployeeManagement = () => {
   const [users, setUsers] = useState([]);
+  const [currentUserRole, setCurrentUserRole] = useState('');
   const [formData, setFormData] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -51,6 +60,18 @@ const EmployeeManagement = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      try {
+        const res = await api.get('/auth/me');
+        setCurrentUserRole(res.data?.user?.role || '');
+      } catch {
+        setCurrentUserRole('');
+      }
+    };
+
+    loadCurrentUser();
+  }, []);
   const fetchUsers = async (searchValue = search) => {
     setLoading(true);
     setError('');
@@ -156,7 +177,7 @@ const EmployeeManagement = () => {
       email: displayEmail(user),
       username: user.username || '',
       contactNumber: user.contactNumber || '',
-      role: ['admin', 'driver'].includes(user.role) ? user.role : 'user',
+      role: ['admin', 'superadmin', 'super_admin', 'super admin', 'super-admin', 'driver'].includes(user.role) ? user.role : 'user',
       password: ''
     });
     setSuccess('');
@@ -290,12 +311,16 @@ const EmployeeManagement = () => {
                     </td>
                     <td className="py-3">
                       <div className="flex justify-end gap-2">
-                        <button onClick={() => handleEdit(user)} className="btn-secondary px-3 py-1.5 text-xs">
-                          Edit
-                        </button>
-                        <button onClick={() => handleDelete(user)} className="btn-danger px-3 py-1.5 text-xs">
-                          Delete
-                        </button>
+                        {!isSuperadmin(user.role) || isSuperadmin(currentUserRole) ? (
+                          <button onClick={() => handleEdit(user)} className="btn-secondary px-3 py-1.5 text-xs">
+                            Edit
+                          </button>
+                        ) : null}
+                        {!isSuperadmin(user.role) && (
+                          <button onClick={() => handleDelete(user)} className="btn-danger px-3 py-1.5 text-xs">
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -339,6 +364,7 @@ const EmployeeManagement = () => {
                     <option value="user">User</option>
                     <option value="driver">Driver</option>
                     <option value="admin">Admin</option>
+                    <option value="superadmin">Super Admin</option>
                   </select>
                 </div>
 
@@ -465,3 +491,4 @@ const EmployeeManagement = () => {
 };
 
 export default EmployeeManagement;
+
