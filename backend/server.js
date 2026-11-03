@@ -44,6 +44,7 @@ app.use('/api/employees', require('./routes/employees'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/company-drivers', require('./routes/companyDrivers'));
+app.use('/api/divisions', require('./routes/divisions'));
 app.use('/api/readings', require('./routes/readings'));
 
 app.get('/api/health', (req, res) => {

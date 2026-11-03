@@ -7,7 +7,7 @@ const { authenticate, authorizeRoles } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.use(authenticate, authorizeRoles('admin'));
+router.use(authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'));
 
 router.get('/summary', async (req, res) => {
   try {

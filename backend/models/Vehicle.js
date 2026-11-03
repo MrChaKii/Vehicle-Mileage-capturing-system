@@ -50,6 +50,11 @@ const vehicleSchema = new mongoose.Schema({
     enum: ['company', 'personal', 'pool'],
     default: 'company'
   },
+  division: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Division',
+    default: null
+  },
   allocatedUser: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

@@ -186,7 +186,7 @@ const AdminDashboard = () => {
                     <p className="text-xs text-slate-500 truncate">{user.email}</p>
                   </div>
                   <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                    user.role === 'admin' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-700'
+                    ['admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'].includes(user.role) ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-700'
                   }`}>
                     {user.role}
                   </span>

@@ -3,6 +3,7 @@ import api from './api';
 import AdminDashboard from './components/AdminDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import CompanyDriverManagement from './components/CompanyDriverManagement';
+import DivisionManagement from './components/DivisionManagement';
 import EmployeeManagement from './components/EmployeeManagement';
 import LoginPage from './components/LoginPage';
 import MeterCapture from './components/MeterCapture';
@@ -71,19 +72,51 @@ const adminNavItems = [
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
       </svg>
     )
+  },
+  {
+    id: 'divisions',
+    label: 'Division Management',
+    path: '/admin/divisions',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h18M3 12h18M3 17h18" />
+      </svg>
+    )
   }
 ];
 
-const defaultAdminPath = '/admin/dashboard';
+const divisionPaths = ['/admin/division', '/admin/divisions', '/admin/division-management', '/admin/divisionManagement'];
 
-const getAdminPageFromPath = (pathname) => (
-  adminNavItems.find(item => item.path === pathname)?.id || 'dashboard'
-);
+const getAdminPageFromPath = (pathname) => {
+  if (divisionPaths.includes(pathname)) {
+    return 'divisions';
+  }
 
-const isAdminPath = (pathname) => adminNavItems.some(item => item.path === pathname);
+  return adminNavItems.find(item => item.path === pathname)?.id || 'dashboard';
+};
+
+const isAdminPath = (pathname) => adminNavItems.some(item => item.path === pathname) || divisionPaths.includes(pathname);
+
+const isSuperAdminRole = (role) => ['superadmin', 'super_admin', 'super admin', 'super-admin'].includes(role);
+
+const hasAdminAccess = (role) => role === 'admin' || isSuperAdminRole(role);
+
+const getAllowedAdminPaths = (role) => {
+  if (isSuperAdminRole(role)) {
+    return adminNavItems.map(item => item.path).concat(divisionPaths);
+  }
+
+  return adminNavItems
+    .filter(item => item.id !== 'dashboard' && item.id !== 'divisions')
+    .map(item => item.path);
+};
+
+const getDefaultAdminPath = (role) => (isSuperAdminRole(role) ? '/admin/dashboard' : '/admin/analytics');
+
+const isAllowedAdminPath = (pathname, role) => getAllowedAdminPaths(role).includes(pathname);
 
 const getUserVehicleOptions = (user) => {
-  if (!user || user.role === 'admin') {
+  if (!user || hasAdminAccess(user.role)) {
     return [];
   }
 
@@ -164,12 +197,17 @@ function App() {
       return;
     }
 
-    if (user.role === 'admin' && !isAdminPath(window.location.pathname)) {
-      window.history.replaceState({}, '', defaultAdminPath);
-      setAdminPage('dashboard');
+    if (hasAdminAccess(user.role)) {
+      if (!isAllowedAdminPath(window.location.pathname, user.role)) {
+        const defaultPath = getDefaultAdminPath(user.role);
+        window.history.replaceState({}, '', defaultPath);
+        setAdminPage(getAdminPageFromPath(defaultPath));
+      } else {
+        setAdminPage(getAdminPageFromPath(window.location.pathname));
+      }
     }
 
-    if (user.role !== 'admin' && window.location.pathname.startsWith('/admin')) {
+    if (!hasAdminAccess(user.role) && window.location.pathname.startsWith('/admin')) {
       window.history.replaceState({}, '', '/');
     }
   }, [authChecked, user]);
@@ -224,7 +262,8 @@ function App() {
     return <LoginPage onLogin={setUser} />;
   }
 
-  const isAdmin = user.role === 'admin';
+  const isAdmin = hasAdminAccess(user.role);
+  const isSuperAdmin = isSuperAdminRole(user.role);
   const isDriver = user.role === 'driver';
   const userVehicleOptions = getUserVehicleOptions(user);
   const selectedVehicleIsAssigned = userVehicleOptions.some(vehicle => vehicle.vehicleNumber === selectedVehicleNumber);
@@ -277,7 +316,7 @@ function App() {
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Admin Menu</p>
                 </div>
                 <nav className="flex lg:flex-col gap-2 overflow-x-auto">
-                  {adminNavItems.map(item => {
+                  {adminNavItems.filter(item => isSuperAdmin ? true : item.id !== 'dashboard' && item.id !== 'divisions').map(item => {
                     const isActive = adminPage === item.id;
 
                     return (
@@ -309,6 +348,8 @@ function App() {
                   <VehicleManagement />
                 ) : adminPage === 'companyDrivers' ? (
                   <CompanyDriverManagement />
+                ) : adminPage === 'divisions' || adminPage === 'division' || adminPage === 'divisionManagement' ? (
+                  <DivisionManagement />
                 ) : adminPage === 'employees' ? (
                   <EmployeeManagement />
                 ) : adminPage === 'analytics' ? (

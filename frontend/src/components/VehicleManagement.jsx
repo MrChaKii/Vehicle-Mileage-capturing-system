@@ -14,6 +14,7 @@ const emptyForm = {
   manufacturingYear: '',
   status: 'active',
   ownership: 'company',
+  division: '',
   allocatedUser: '',
   allocatedDrivers: [],
   dateOfPurchasing: '',
@@ -99,6 +100,7 @@ const VehicleManagement = () => {
   const [vehicles, setVehicles] = useState([]);
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [poolAssignableUsers, setPoolAssignableUsers] = useState([]);
+  const [divisions, setDivisions] = useState([]);
   const [formData, setFormData] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -137,10 +139,11 @@ const VehicleManagement = () => {
 
     const loadData = async () => {
       try {
-        const [vehiclesRes, usersRes, poolUsersRes] = await Promise.all([
+        const [vehiclesRes, usersRes, poolUsersRes, divisionsRes] = await Promise.all([
           api.get('/vehicles'),
           api.get('/users', { params: { assignable: true } }),
-          api.get('/users', { params: { poolAssignable: true } })
+          api.get('/users', { params: { poolAssignable: true } }),
+          api.get('/divisions')
         ]);
 
         if (!isActive) {
@@ -150,6 +153,7 @@ const VehicleManagement = () => {
         setVehicles(vehiclesRes.data);
         setAssignableUsers(usersRes.data);
         setPoolAssignableUsers(poolUsersRes.data);
+        setDivisions(divisionsRes.data || []);
       } catch (err) {
         if (isActive) {
           setError(err.response?.data?.error || 'Failed to load vehicles');
@@ -172,10 +176,20 @@ const VehicleManagement = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const fetchDivisions = async () => {
+    try {
+      const res = await api.get('/divisions');
+      setDivisions(res.data || []);
+    } catch {
+      setDivisions([]);
+    }
+  };
+
   const handleOwnershipChange = (value) => {
     setFormData(prev => ({
       ...prev,
       ownership: value,
+      division: value === 'pool' && divisions.length > 0 ? divisions[0]._id : prev.division,
       allocatedUser: '',
       allocatedDrivers: [],
       dateOfPurchasing: value === 'personal' ? '' : prev.dateOfPurchasing,
@@ -188,6 +202,7 @@ const VehicleManagement = () => {
     setEditingId(null);
     setError('');
     setSuccess('');
+    fetchDivisions();
     setIsModalOpen(true);
   };
 
@@ -316,6 +331,7 @@ const VehicleManagement = () => {
       manufacturingYear: vehicle.manufacturingYear?.toString() || '',
       status: vehicle.status || 'active',
       ownership: vehicle.ownership || 'company',
+      division: vehicle.division?._id || vehicle.division || '',
       allocatedUser: vehicle.allocatedUser?._id || '',
       allocatedDrivers: vehicle.allocatedDrivers?.map(driver => driver._id) || [],
       dateOfPurchasing: formatDateInput(vehicle.dateOfPurchasing),
@@ -641,6 +657,28 @@ const VehicleManagement = () => {
                             </option>
                           ))}
                         </select>
+                      </div>
+                    </div>
+
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Division</label>
+                        <select
+                          value={formData.division}
+                          onChange={(e) => handleChange('division', e.target.value)}
+                          className="input"
+                        >
+                          <option value="">Select division</option>
+                          {divisions.map(division => (
+                            <option key={division._id} value={division._id}>
+                              {division.name}{division.code ? ` (${division.code})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {formData.ownership === 'pool' && (
+                          <p className="text-xs text-slate-500 mt-1">Auto-selected for pool vehicle</p>
+                        )}
                       </div>
                     </div>
                   </>
