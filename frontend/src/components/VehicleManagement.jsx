@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import api from '../api';
-import VehicleUsage from './VehicleUsage';
 
 const emptyForm = {
   vehicleNumberLetters: '',
@@ -111,7 +110,6 @@ const VehicleManagement = () => {
   const [reassignmentConflict, setReassignmentConflict] = useState(null);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [historyVehicle, setHistoryVehicle] = useState(null);
-  const [isVehicleUsageOpen, setIsVehicleUsageOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -366,10 +364,6 @@ const VehicleManagement = () => {
     fetchVehicles(search.trim());
   };
 
-  if (isVehicleUsageOpen) {
-    return <VehicleUsage onBack={() => setIsVehicleUsageOpen(false)} />;
-  }
-
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -378,9 +372,6 @@ const VehicleManagement = () => {
           <p className="text-sm text-slate-500 mt-1">Create, view, update, delete, and allocate vehicles.</p>
         </div>
         <div className="flex gap-3">
-          <button onClick={() => setIsVehicleUsageOpen(true)} className="btn-secondary self-start sm:self-auto">
-            Vehicle Usage
-          </button>
           <button onClick={openCreateModal} className="btn-primary self-start sm:self-auto">
             Create Vehicle
           </button>
