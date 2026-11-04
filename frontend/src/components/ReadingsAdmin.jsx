@@ -93,23 +93,29 @@ const ReadingsAdmin = () => {
   const [actionLoading, setActionLoading] = useState(false);
 
   // Filters
-  const [vehicleFilter, setVehicleFilter] = useState('');
-  const [driverFilter, setDriverFilter] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [vehicles, setVehicles] = useState([]);
+  const [ownershipFilter, setOwnershipFilter] = useState('');
+  const [vehicleNoFilter, setVehicleNoFilter] = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
+  const [useCustomRange, setUseCustomRange] = useState(false);
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   const debounceRef = useRef(null);
 
   const buildParams = useCallback(
     (overridePage) => {
       const params = { page: overridePage ?? page };
-      if (vehicleFilter) params.vehicleId = vehicleFilter;
-      if (driverFilter) params.driverName = driverFilter;
-      if (startDate) params.startDate = startDate;
-      if (endDate) params.endDate = endDate;
+      if (vehicleNoFilter) params.vehicleId = vehicleNoFilter;
+      else if (ownershipFilter) params.ownership = ownershipFilter;
+      if (!useCustomRange && monthFilter) params.month = monthFilter;
+      if (useCustomRange) {
+        if (customStartDate) params.startDate = customStartDate;
+        if (customEndDate) params.endDate = customEndDate;
+      }
       return params;
     },
-    [page, vehicleFilter, driverFilter, startDate, endDate]
+    [page, vehicleNoFilter, ownershipFilter, monthFilter, useCustomRange, customStartDate, customEndDate]
   );
 
   const fetchReadings = useCallback(async (overridePage) => {
@@ -142,7 +148,14 @@ const ReadingsAdmin = () => {
     }, 400);
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vehicleFilter, driverFilter, startDate, endDate]);
+  }, [ownershipFilter, vehicleNoFilter, monthFilter, useCustomRange, customStartDate, customEndDate]);
+
+  // Load vehicles for category / vehicle-number filter options
+  useEffect(() => {
+    api.get('/vehicles')
+      .then(res => setVehicles(Array.isArray(res.data) ? res.data : []))
+      .catch(() => setVehicles([]));
+  }, []);
 
   const handlePageChange = (newPage) => {
     fetchReadings(newPage);
@@ -150,10 +163,12 @@ const ReadingsAdmin = () => {
   };
 
   const handleClearFilters = () => {
-    setVehicleFilter('');
-    setDriverFilter('');
-    setStartDate('');
-    setEndDate('');
+    setOwnershipFilter('');
+    setVehicleNoFilter('');
+    setMonthFilter('');
+    setUseCustomRange(false);
+    setCustomStartDate('');
+    setCustomEndDate('');
   };
 
   const openEditModal = (reading) => {
@@ -222,7 +237,23 @@ const ReadingsAdmin = () => {
   const startEntry = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const endEntry = Math.min(page * PAGE_SIZE, total);
 
-  const hasActiveFilter = vehicleFilter || driverFilter || startDate || endDate;
+  const hasActiveFilter = ownershipFilter || vehicleNoFilter || monthFilter || (useCustomRange && (customStartDate || customEndDate));
+
+  const ownerships = [...new Set(vehicles.map(v => v.ownership).filter(Boolean))].sort();
+  const vehicleNumbers = [...new Set(vehicles.map(v => v.vehicleNumber).filter(Boolean))].sort();
+
+  const monthOptions = (() => {
+    const opts = [];
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      opts.push({
+        value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        label: d.toLocaleString('en-US', { month: 'short', year: 'numeric' })
+      });
+    }
+    return opts;
+  })();
 
   // Build pagination page numbers (max 7 buttons)
   const paginationPages = (() => {
@@ -385,73 +416,122 @@ const ReadingsAdmin = () => {
           )}
         </div>
 
+        {/* Custom date range toggle */}
+        <div className="flex items-center gap-3 mb-4">
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={useCustomRange}
+              onChange={e => {
+                setUseCustomRange(e.target.checked);
+                if (e.target.checked) setMonthFilter('');
+                else { setCustomStartDate(''); setCustomEndDate(''); }
+              }}
+              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            />
+            Enable custom date range
+          </label>
+          <span className="text-xs text-slate-500">Monthly filter is disabled when custom range is enabled</span>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
             <label
-              htmlFor="readingsVehicleFilter"
+              htmlFor="readingsOwnershipFilter"
               className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider"
             >
-              Vehicle ID
+              Vehicle Category
             </label>
-            <input
-              id="readingsVehicleFilter"
-              type="text"
-              value={vehicleFilter}
-              onChange={e => setVehicleFilter(e.target.value)}
-              placeholder="e.g. ABC-123"
+            <select
+              id="readingsOwnershipFilter"
+              value={ownershipFilter}
+              onChange={e => setOwnershipFilter(e.target.value)}
               className="input text-sm"
-            />
+            >
+              <option value="">All categories</option>
+              {ownerships.map(own => (
+                <option key={own} value={own}>{own.charAt(0).toUpperCase() + own.slice(1)}</option>
+              ))}
+            </select>
           </div>
 
           <div>
             <label
-              htmlFor="readingsDriverFilter"
+              htmlFor="readingsVehicleNoFilter"
               className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider"
             >
-              Driver Name
+              Vehicle No
             </label>
-            <input
-              id="readingsDriverFilter"
-              type="text"
-              value={driverFilter}
-              onChange={e => setDriverFilter(e.target.value)}
-              placeholder="Search driver…"
+            <select
+              id="readingsVehicleNoFilter"
+              value={vehicleNoFilter}
+              onChange={e => setVehicleNoFilter(e.target.value)}
               className="input text-sm"
-            />
+            >
+              <option value="">Select vehicle</option>
+              {vehicleNumbers.map(vn => (
+                <option key={vn} value={vn}>{vn}</option>
+              ))}
+            </select>
           </div>
 
           <div>
             <label
-              htmlFor="readingsStartDate"
+              htmlFor="readingsMonthFilter"
               className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider"
             >
-              From Date
+              Monthly
             </label>
-            <input
-              id="readingsStartDate"
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="input text-sm"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="readingsEndDate"
-              className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider"
+            <select
+              id="readingsMonthFilter"
+              value={monthFilter}
+              onChange={e => setMonthFilter(e.target.value)}
+              disabled={useCustomRange}
+              className={`input text-sm ${useCustomRange ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
-              To Date
-            </label>
-            <input
-              id="readingsEndDate"
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="input text-sm"
-            />
+              <option value="">Select month</option>
+              {monthOptions.map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
           </div>
         </div>
+
+        {/* Custom date range inputs (only active when enabled) */}
+        {useCustomRange && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-100">
+            <div>
+              <label
+                htmlFor="readingsCustomStartDate"
+                className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider"
+              >
+                From Date
+              </label>
+              <input
+                id="readingsCustomStartDate"
+                type="date"
+                value={customStartDate}
+                onChange={e => setCustomStartDate(e.target.value)}
+                className="input text-sm"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="readingsCustomEndDate"
+                className="block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wider"
+              >
+                To Date
+              </label>
+              <input
+                id="readingsCustomEndDate"
+                type="date"
+                value={customEndDate}
+                onChange={e => setCustomEndDate(e.target.value)}
+                className="input text-sm"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Table Card ── */}
