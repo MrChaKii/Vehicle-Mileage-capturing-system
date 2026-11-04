@@ -150,11 +150,16 @@ router.post('/', async (req, res) => {
 // GET /api/readings — All readings (admin, filterable + paginated)
 router.get('/', async (req, res) => {
   try {
-    const { vehicleId, driverName, userKey, startDate, endDate, page = 1 } = req.query;
+    const { vehicleId, driverName, userKey, startDate, endDate, ownership, month, page = 1 } = req.query;
     const PAGE_SIZE = 50;
 
     const filter = {};
     if (vehicleId) filter.vehicleId = { $regex: vehicleId.trim(), $options: 'i' };
+    else if (ownership) {
+      const ownershipVehicles = await Vehicle.find({ ownership }).select('vehicleNumber');
+      const vehicleNumbers = ownershipVehicles.map(v => v.vehicleNumber);
+      filter.vehicleId = vehicleNumbers.length ? { $in: vehicleNumbers } : { $in: [] };
+    }
     if (driverName) filter.driverName = { $regex: driverName.trim(), $options: 'i' };
     if (userKey) {
       const [type, ...valueParts] = userKey.split(':');
@@ -177,6 +182,14 @@ router.get('/', async (req, res) => {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
         filter.readingDate.$lte = end;
+      }
+    } else if (month) {
+      const [year, monthIndex] = String(month).split('-').map(Number);
+      if (Number.isFinite(year) && Number.isFinite(monthIndex) && monthIndex >= 1 && monthIndex <= 12) {
+        filter.readingDate = {
+          $gte: new Date(Date.UTC(year, monthIndex - 1, 1)),
+          $lt: new Date(Date.UTC(year, monthIndex, 1))
+        };
       }
     }
 
