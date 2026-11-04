@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import api from '../api';
 
-const MeterCapture = ({ vehicleId, driverName }) => {
+const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -118,7 +118,10 @@ const MeterCapture = ({ vehicleId, driverName }) => {
         isCorrected,
         originalMileage: formData.originalMileage,
         location: null,
-        driverName: driverName || ''
+        driverName: driverName || '',
+        division: divisionId || null,
+        divisionName: divisionName || '',
+        reason: reason || ''
       };
 
       if (navigator.geolocation) {
@@ -358,6 +361,13 @@ const MeterCapture = ({ vehicleId, driverName }) => {
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Vehicle ID</label>
               <input type="text" value={vehicleId} disabled className="input bg-slate-100 text-slate-500 cursor-not-allowed" />
             </div>
+
+            {divisionName && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Division</label>
+                <input type="text" value={divisionName} disabled className="input bg-slate-100 text-slate-500 cursor-not-allowed" />
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Detected Text</label>
