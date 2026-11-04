@@ -153,11 +153,13 @@ function App() {
   const [adminPage, setAdminPage] = useState(() => getAdminPageFromPath(window.location.pathname));
   const [selectedVehicleNumber, setSelectedVehicleNumber] = useState('');
 
-  // Driver login: vehicle & driver name dropdowns
-  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [] });
+  // Driver login: vehicle, driver name & division (for pool vehicles) dropdowns
+  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [], divisions: [] });
   const [driverOptionsLoaded, setDriverOptionsLoaded] = useState(false);
   const [selectedDriverVehicle, setSelectedDriverVehicle] = useState('');
   const [selectedDriverName, setSelectedDriverName] = useState('');
+  const [selectedDivision, setSelectedDivision] = useState('');
+  const [poolVehicleReason, setPoolVehicleReason] = useState('');
   const [driverSelectionConfirmed, setDriverSelectionConfirmed] = useState(false);
   const [driverOptionsError, setDriverOptionsError] = useState(null);
 
@@ -212,7 +214,7 @@ function App() {
     }
   }, [authChecked, user]);
 
-  // Auto-load vehicle & driver name options when a driver logs in
+  // Auto-load vehicle, driver name & division options when a driver logs in
   useEffect(() => {
     if (!user || user.role !== 'driver') return;
     const loadOptions = async () => {
@@ -236,6 +238,8 @@ function App() {
     setSelectedVehicleNumber('');
     setSelectedDriverVehicle('');
     setSelectedDriverName('');
+    setSelectedDivision('');
+    setPoolVehicleReason('');
     setDriverSelectionConfirmed(false);
     setDriverOptionsLoaded(false);
   };
@@ -265,6 +269,11 @@ function App() {
   const isAdmin = hasAdminAccess(user.role);
   const isSuperAdmin = isSuperAdminRole(user.role);
   const isDriver = user.role === 'driver';
+  const isPoolVehicleSelected = driverOptions.vehicles.some(vehicle => (
+    vehicle.vehicleNumber === selectedDriverVehicle && vehicle.ownership === 'pool'
+  ));
+  const isDriverSelectionComplete = selectedDriverVehicle && selectedDriverName && (!isPoolVehicleSelected || (selectedDivision && poolVehicleReason.trim()));
+  const selectedDivisionName = driverOptions.divisions.find(division => division._id === selectedDivision)?.name || '';
   const userVehicleOptions = getUserVehicleOptions(user);
   const selectedVehicleIsAssigned = userVehicleOptions.some(vehicle => vehicle.vehicleNumber === selectedVehicleNumber);
   const assignedVehicle = selectedVehicleIsAssigned
@@ -372,7 +381,11 @@ function App() {
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Driver Workspace</p>
                     <h2 className="text-xl font-bold text-slate-900">Before You Scan</h2>
-                    <p className="text-sm text-slate-500 mt-1">Select your vehicle and name to continue.</p>
+                    <p className="text-sm text-slate-500 mt-1">
+                      {isPoolVehicleSelected
+                        ? 'Select vehicle, name, division, and provide reason to continue.'
+                        : 'Select your vehicle and name to continue.'}
+                    </p>
                   </div>
 
                   {/* Loading state */}
@@ -417,7 +430,14 @@ function App() {
                         <select
                           id="driverVehicleSelect"
                           value={selectedDriverVehicle}
-                          onChange={e => setSelectedDriverVehicle(e.target.value)}
+                          onChange={e => {
+                            const vehicle = driverOptions.vehicles.find(v => v.vehicleNumber === e.target.value);
+                            setSelectedDriverVehicle(e.target.value);
+                            if (vehicle?.ownership !== 'pool') {
+                              setSelectedDivision('');
+                              setPoolVehicleReason('');
+                            }
+                          }}
                           className="input"
                         >
                           <option value="">— Select a vehicle —</option>
@@ -449,12 +469,52 @@ function App() {
                         </select>
                       </div>
 
+                      {/* Division dropdown (pool vehicles only) */}
+                      {isPoolVehicleSelected && (
+                        <div>
+                          <label htmlFor="divisionSelect" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                            Division <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            id="divisionSelect"
+                            value={selectedDivision}
+                            onChange={e => setSelectedDivision(e.target.value)}
+                            className="input"
+                          >
+                            <option value="">— Select the division —</option>
+                            {driverOptions.divisions.map(d => (
+                              <option key={d._id} value={d._id}>
+                                {d.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Reason text box (pool vehicles only) */}
+                      {isPoolVehicleSelected && (
+                        <div>
+                          <label htmlFor="poolVehicleReason" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                            Reason <span className="text-red-500">*</span>
+                          </label>
+                          <textarea
+                            id="poolVehicleReason"
+                            rows={2}
+                            maxLength={120}
+                            value={poolVehicleReason}
+                            onChange={e => setPoolVehicleReason(e.target.value)}
+                            placeholder="Enter your reason for using this vehicle"
+                            className="input"
+                          />
+                        </div>
+                      )}
+
                       <button
                         onClick={() => {
-                          if (!selectedDriverVehicle || !selectedDriverName) return;
+                          if (!isDriverSelectionComplete) return;
                           setDriverSelectionConfirmed(true);
                         }}
-                        disabled={!selectedDriverVehicle || !selectedDriverName}
+                        disabled={!isDriverSelectionComplete}
                         className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         ✓ Confirm &amp; Proceed to Scan
@@ -471,6 +531,12 @@ function App() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Driver Workspace</p>
                     <h2 className="text-xl font-bold text-slate-900 mt-1">{selectedDriverVehicle}</h2>
                     <p className="text-sm text-slate-500 mt-1">Driver: {selectedDriverName}</p>
+                    {isPoolVehicleSelected && (
+                      <>
+                        <p className="text-sm text-slate-500 mt-1">Division: {selectedDivisionName}</p>
+                        <p className="text-sm text-slate-500 mt-1 break-words">Reason: {poolVehicleReason.trim()}</p>
+                      </>
+                    )}
                   </div>
                   <button
                     onClick={() => setDriverSelectionConfirmed(false)}
@@ -490,6 +556,9 @@ function App() {
                       key={`capture-driver-${selectedDriverVehicle}`}
                       vehicleId={selectedDriverVehicle}
                       driverName={selectedDriverName}
+                      divisionId={selectedDivision}
+                      divisionName={selectedDivisionName}
+                      reason={poolVehicleReason.trim()}
                     />
                   </div>
 

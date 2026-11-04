@@ -46,6 +46,23 @@ const readingSchema = new mongoose.Schema({
   driverName: {
     type: String,
     default: ''
+  },
+  // Store division and reason (specifically for pool vehicles)
+  division: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Division',
+    default: null
+  },
+  divisionName: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  reason: {
+    type: String,
+    trim: true,
+    maxlength: 120,
+    default: ''
   }
 }, { timestamps: true });
 

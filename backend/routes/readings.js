@@ -6,6 +6,7 @@ const FormData = require('form-data');
 const Reading = require('../models/Reading');
 const Vehicle = require('../models/Vehicle');
 const CompanyDriver = require('../models/CompanyDriver');
+const Division = require('../models/Division');
 const User = require('../models/User');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 
@@ -33,15 +34,16 @@ const getOcrExtractUrl = () => {
 
 router.use(authenticate);
 
-// GET /api/readings/options — Return vehicles and company drivers for driver login dropdowns
+// GET /api/readings/options — Return vehicles, company drivers, and divisions for driver login dropdowns
 router.get('/options', async (req, res) => {
   try {
-    const [vehicles, companyDrivers] = await Promise.all([
+    const [vehicles, companyDrivers, divisions] = await Promise.all([
       Vehicle.find({ status: 'active' }).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership'),
-      CompanyDriver.find().sort({ employeeName: 1 }).select('employeeId employeeName')
+      CompanyDriver.find().sort({ employeeName: 1 }).select('employeeId employeeName'),
+      Division.find().sort({ name: 1 }).select('name')
     ]);
 
-    res.json({ vehicles, companyDrivers });
+    res.json({ vehicles, companyDrivers, divisions });
   } catch (error) {
     console.error('Options load error:', error);
     res.status(500).json({ error: 'Failed to load options' });
@@ -101,7 +103,7 @@ router.post('/extract', upload.single('meterImage'), async (req, res) => {
 // POST /api/readings — Save after user confirms/corrects
 router.post('/', async (req, res) => {
   try {
-    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location, driverName } = req.body;
+    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location, driverName, division, divisionName, reason } = req.body;
 
     if (!vehicleId || mileage === undefined) {
       return res.status(400).json({ error: 'vehicleId and mileage are required' });
@@ -126,7 +128,10 @@ router.post('/', async (req, res) => {
       originalMileage: originalMileage || null,
       location,
       submittedBy: req.user._id.toString(),
-      driverName: driverName || ''
+      driverName: driverName || '',
+      division: division || null,
+      divisionName: divisionName || '',
+      reason: reason || ''
     });
 
     await reading.save();
