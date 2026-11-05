@@ -299,10 +299,10 @@ function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            {!isAdmin && (
+            {!isAdmin && (!isDriver || driverSelectionConfirmed) && (
               <div className="hidden sm:flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-1.5">
                 <span className="text-xs text-slate-500 font-medium">Vehicle</span>
-                <span className="text-sm font-bold text-slate-900 font-mono">{assignedVehicle || 'Unassigned'}</span>
+                <span className="text-sm font-bold text-slate-900 font-mono">{isDriver ? selectedDriverVehicle : (assignedVehicle || 'Unassigned')}</span>
               </div>
             )}
             <div className="hidden sm:block text-right">

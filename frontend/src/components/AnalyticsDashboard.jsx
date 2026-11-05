@@ -336,6 +336,9 @@ const AnalyticsDashboard = () => {
     [...(analytics?.vehicleUsage || [])]
       .sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber))
   ), [analytics]);
+  const poolVehicleUsage = useMemo(() => (
+    currentVehicleMileage.filter(vehicle => vehicle.ownership === 'pool')
+  ), [currentVehicleMileage]);
   const reportSummary = useMemo(() => summarizeUsage(reportUsage), [reportUsage]);
   const contributionSummary = useMemo(() => summarizeUsage(contributionUsage), [contributionUsage]);
   const reportDistance = reportUsage.reduce((total, row) => total + row.distance, 0);
@@ -393,7 +396,7 @@ const AnalyticsDashboard = () => {
         <KpiCard
           label="Total Daily Kilometers"
           value={formatKm(kpis.latestDailyKilometers)}
-          subtext={kpis.latestUsageDate ? `Latest recorded day: ${formatReportDate(kpis.latestUsageDate)}` : 'No daily usage recorded'}
+          subtext={kpis.latestUsageDate ? `Last recorded day: ${formatReportDate(kpis.latestUsageDate)}` : 'No daily usage recorded'}
           tone="brand"
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -458,6 +461,46 @@ const AnalyticsDashboard = () => {
                 <p className="text-2xl font-bold text-slate-950 mt-4">{vehicle.lastMileage == null ? 'No reading' : formatKm(vehicle.lastMileage)}</p>
                 <p className="text-xs text-slate-500 mt-1">{vehicle.lastReadingDate ? `Last reading: ${formatReadingTime(vehicle.lastReadingDate)}` : 'No reading submitted yet'}</p>
               </article>
+            ))}
+          </div>
+        )}
+      </section> 
+
+      {
+      // Monthly pool vehicle usage section
+      }
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-slate-950">Monthly pool vehicle usage</h3>
+            </div>
+            <p className="text-sm text-slate-500 mt-1">This month's total mileage, number of days used, and average mileage per day for each pool vehicle.</p>
+          </div>
+
+        </div>
+
+        {poolVehicleUsage.length === 0 ? (
+          <EmptyState title="No pool vehicles" text="Registered pool vehicles will appear here automatically." />
+        ) : (
+          <div className="grid grid-cols-2 gap-y-4 gap-x-10 p-6">
+            {poolVehicleUsage.map(vehicle => (
+              <div key={vehicle.vehicleNumber} className="min-w-0 rounded-lg bg-slate-50 border border-slate-200 p-4">
+                <p className="font-mono text-sm font-bold text-brand-700 truncate">{vehicle.vehicleNumber}</p>
+                <p className="text-xs text-slate-500 mt-1 truncate">{[vehicle.make, vehicle.name, vehicle.model].filter(Boolean).join(' ') || 'Vehicle details unavailable'}</p>
+                <p className="text-2xl font-bold text-slate-950 mt-4">{formatKm(vehicle.monthDistance)}</p>
+                <p className="text-xs text-slate-500 mt-1">Total mileage this month</p>
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">{formatNumber(vehicle.monthDaysUsed)}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Days used this month</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">{formatKm(vehicle.monthDaysUsed ? vehicle.monthDistance / vehicle.monthDaysUsed : 0)}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Average per day</p>
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         )}
