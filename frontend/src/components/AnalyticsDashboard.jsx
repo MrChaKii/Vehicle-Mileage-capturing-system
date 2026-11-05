@@ -3,6 +3,15 @@ import api from '../api';
 
 const formatNumber = (value) => Math.round(value || 0).toLocaleString();
 
+const formatFuelNumber = (value) => new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 2
+}).format(value || 0);
+
+const formatFuelAmount = (value) => new Intl.NumberFormat(undefined, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+}).format(value || 0);
+
 const formatKm = (value) => `${formatNumber(value)} km`;
 
 const formatReportDate = (value) => {
@@ -243,6 +252,11 @@ const DateRangeFilter = ({ filters, onChange, onSubmit, error, searching }) => (
 
 const AnalyticsDashboard = () => {
   const [analytics, setAnalytics] = useState(null);
+  const [fuelTypeMonth, setFuelTypeMonth] = useState(() => getCurrentMonth());
+  const [fuelTypeSummary, setFuelTypeSummary] = useState(null);
+  const [fuelTypeLoading, setFuelTypeLoading] = useState(true);
+  const [fuelTypeError, setFuelTypeError] = useState('');
+  const fuelTypeRequestId = useRef(0);
   const [poolVehicleUsage, setPoolVehicleUsage] = useState([]);
   const [poolMonth, setPoolMonth] = useState(() => getCurrentMonth());
   const [poolMonthInput, setPoolMonthInput] = useState(() => getCurrentMonth());
@@ -282,6 +296,33 @@ const AnalyticsDashboard = () => {
       }
     }
   }, []);
+
+  useEffect(() => {
+    const requestId = ++fuelTypeRequestId.current;
+    let active = true;
+
+    api.get('/fuel-usage/summary', { params: { month: fuelTypeMonth } })
+      .then(res => {
+        if (active && requestId === fuelTypeRequestId.current) {
+          setFuelTypeSummary(res.data);
+          setFuelTypeError('');
+        }
+      })
+      .catch(err => {
+        if (active && requestId === fuelTypeRequestId.current) {
+          setFuelTypeError(err.response?.data?.error || 'Failed to load fuel usage by type');
+        }
+      })
+      .finally(() => {
+        if (active && requestId === fuelTypeRequestId.current) {
+          setFuelTypeLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [fuelTypeMonth]);
 
   const fetchPoolVehicleUsage = useCallback(async (month) => {
     const requestId = ++poolRequestId.current;
@@ -389,10 +430,70 @@ const AnalyticsDashboard = () => {
   const reportUsers = reportSummary.length;
   const reportVehicles = new Set(reportUsage.map(row => row.vehicleNumber)).size;
   const averageGapDistance = reportUsage.length ? reportDistance / reportUsage.length : 0;
+  const fuelTypePanel = (
+    <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-950">Fuel usage by type</h3>
+          <p className="text-sm text-slate-500 mt-1">Monthly fuel liters and amount from the uploaded fuel report.</p>
+        </div>
+        <label className="text-xs font-semibold text-slate-500">
+          Report month
+          <input
+            type="month"
+            value={fuelTypeMonth}
+            onChange={event => {
+              setFuelTypeMonth(event.target.value);
+              setFuelTypeLoading(true);
+              setFuelTypeError('');
+            }}
+            className="input mt-1 min-w-40"
+          />
+        </label>
+      </div>
+
+      {fuelTypeError ? (
+        <p className="px-6 py-5 text-sm text-red-700" role="alert">{fuelTypeError}</p>
+      ) : fuelTypeLoading && !fuelTypeSummary ? (
+        <p className="px-6 py-5 text-sm text-slate-500">Loading fuel report...</p>
+      ) : !fuelTypeSummary?.fuelTypeTotals?.length ? (
+        <p className="px-6 py-5 text-sm text-slate-500">No fuel-type report imported for {fuelTypeMonth}.</p>
+      ) : (
+        <div className={`overflow-x-auto transition-opacity ${fuelTypeLoading ? 'opacity-50' : ''}`}>
+          <table className="w-full">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Fuel</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Liters</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {fuelTypeSummary.fuelTypeTotals.map(item => (
+                <tr key={item.fuelType} className="hover:bg-slate-50">
+                  <td className="px-6 py-3 text-sm font-medium text-slate-900">{item.fuelType}</td>
+                  <td className="px-6 py-3 text-right font-mono text-sm text-slate-700">{formatFuelNumber(item.liters)}</td>
+                  <td className="px-6 py-3 text-right font-mono text-sm text-slate-700">{formatFuelAmount(item.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-slate-50 border-t border-slate-200">
+                <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Total</th>
+                <th className="px-6 py-3 text-right font-mono text-sm font-semibold text-slate-900">{formatFuelNumber(fuelTypeSummary.totals.totalUsage)}</th>
+                <th className="px-6 py-3 text-right font-mono text-sm font-semibold text-slate-900">{formatFuelAmount(fuelTypeSummary.totals.totalAmount)}</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+  );
 
   if (loading) {
     return (
       <div className="space-y-6 animate-pulse">
+        {fuelTypePanel}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map(item => <div key={item} className="h-32 bg-white border border-slate-200 rounded-xl" />)}
         </div>
@@ -406,9 +507,12 @@ const AnalyticsDashboard = () => {
 
   if (error) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
-        <p className="text-red-700 font-medium">{error}</p>
-        <button onClick={refreshAnalytics} className="btn-primary mt-4">Retry</button>
+      <div className="space-y-6">
+        {fuelTypePanel}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
+          <p className="text-red-700 font-medium">{error}</p>
+          <button onClick={refreshAnalytics} className="btn-primary mt-4">Retry</button>
+        </div>
       </div>
     );
   }
@@ -435,6 +539,8 @@ const AnalyticsDashboard = () => {
           </button>
         </div>
       </div>
+
+      {fuelTypePanel}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <KpiCard
