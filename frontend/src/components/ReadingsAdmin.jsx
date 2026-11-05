@@ -43,6 +43,7 @@ function exportToCSV(readings) {
   const headers = [
     'Date',
     'Vehicle',
+    'Meter',
     'User',
     'Mileage (km)',
     'Corrected',
@@ -52,6 +53,7 @@ function exportToCSV(readings) {
   const rows = readings.map(r => [
     new Date(r.readingDate).toLocaleString(),
     r.vehicleId,
+    r.meterType ? r.meterType.toUpperCase() : '',
     r.driverName ? `${r.driverName} (Driver)` : r.submittedByName || r.submittedBy,
     r.extractedMileage,
     r.isCorrected ? 'Yes' : 'No',
@@ -618,6 +620,9 @@ const ReadingsAdmin = () => {
                     Vehicle
                   </th>
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
+                    Meter
+                  </th>
+                  <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
                     User
                   </th>
                   <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
@@ -661,6 +666,11 @@ const ReadingsAdmin = () => {
                       <span className="font-mono text-sm font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
                         {reading.vehicleId}
                       </span>
+                    </td>
+
+                    {/* Meter */}
+                    <td className="px-4 py-3.5 text-sm font-semibold text-slate-700 whitespace-nowrap">
+                      {reading.meterType ? reading.meterType.toUpperCase() : <span className="font-normal text-slate-400">—</span>}
                     </td>
 
                     {/* User */}

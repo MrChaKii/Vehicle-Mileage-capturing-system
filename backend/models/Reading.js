@@ -63,6 +63,12 @@ const readingSchema = new mongoose.Schema({
     trim: true,
     maxlength: 120,
     default: ''
+  },
+  // Pool vehicle hires: 'out' when the vehicle leaves, 'in' when it is returned
+  meterType: {
+    type: String,
+    enum: ['out', 'in', null],
+    default: null
   }
 }, { timestamps: true });
 

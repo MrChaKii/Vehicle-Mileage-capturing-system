@@ -34,16 +34,17 @@ const getOcrExtractUrl = () => {
 
 router.use(authenticate);
 
-// GET /api/readings/options — Return vehicles, company drivers, and divisions for driver login dropdowns
+// GET /api/readings/options — Return vehicles, company drivers, divisions, and users for driver login dropdowns
 router.get('/options', async (req, res) => {
   try {
-    const [vehicles, companyDrivers, divisions] = await Promise.all([
+    const [vehicles, companyDrivers, divisions, users] = await Promise.all([
       Vehicle.find({ status: 'active' }).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership'),
       CompanyDriver.find().sort({ employeeName: 1 }).select('employeeId employeeName'),
-      Division.find().sort({ name: 1 }).select('name')
+      Division.find().sort({ name: 1 }).select('name'),
+      User.find({ role: 'user', isActive: true }).sort({ name: 1 }).select('name')
     ]);
 
-    res.json({ vehicles, companyDrivers, divisions });
+    res.json({ vehicles, companyDrivers, divisions, users });
   } catch (error) {
     console.error('Options load error:', error);
     res.status(500).json({ error: 'Failed to load options' });
@@ -111,6 +112,26 @@ router.post('/', async (req, res) => {
 
     // Optional: Validate against last reading to prevent rollback
     const lastReading = await Reading.findOne({ vehicleId }).sort({ readingDate: -1 });
+
+    // Driver login on a pool vehicle: readings alternate between OUT and IN
+    let meterType = null;
+    if (req.user.role === 'driver') {
+      const vehicle = await Vehicle.findOne({ vehicleNumber: vehicleId.toUpperCase().trim() }).select('ownership');
+
+      if (vehicle?.ownership === 'pool') {
+        const isVehicleOut = lastReading?.meterType === 'out';
+        const isSamePerson = (lastReading?.driverName || '').trim().toLowerCase() === (driverName || '').trim().toLowerCase();
+
+        if (isVehicleOut && !isSamePerson) {
+          return res.status(409).json({
+            error: `This vehicle is currently out with ${lastReading.driverName}. Only they can return it.`
+          });
+        }
+
+        meterType = isVehicleOut ? 'in' : 'out';
+      }
+    }
+
     if (lastReading && mileage < lastReading.extractedMileage) {
       return res.status(400).json({
         error: 'Mileage is less than last recorded reading',
@@ -131,7 +152,8 @@ router.post('/', async (req, res) => {
       driverName: driverName || '',
       division: division || null,
       divisionName: divisionName || '',
-      reason: reason || ''
+      reason: reason || '',
+      meterType
     });
 
     await reading.save();
@@ -142,7 +164,8 @@ router.post('/', async (req, res) => {
         id: reading._id,
         vehicleId: reading.vehicleId,
         mileage: reading.extractedMileage,
-        date: reading.readingDate
+        date: reading.readingDate,
+        meterType: reading.meterType
       }
     });
 

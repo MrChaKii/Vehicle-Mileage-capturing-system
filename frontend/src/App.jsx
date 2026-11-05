@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from './api';
 import AdminDashboard from './components/AdminDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
@@ -7,6 +7,7 @@ import DivisionManagement from './components/DivisionManagement';
 import EmployeeManagement from './components/EmployeeManagement';
 import LoginPage from './components/LoginPage';
 import MeterCapture from './components/MeterCapture';
+import PoolVehicleMeter from './components/PoolVehicleMeter';
 import ReadingHistory from './components/ReadingHistory';
 import ReadingsAdmin from './components/ReadingsAdmin';
 import VehicleManagement from './components/VehicleManagement';
@@ -147,6 +148,8 @@ const getVehicleLabel = (vehicle) => {
   return details ? `${vehicle.vehicleNumber} - ${details}` : vehicle.vehicleNumber;
 };
 
+const SPECIAL_USER_OPTION = '__special_user__';
+
 function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -154,14 +157,17 @@ function App() {
   const [selectedVehicleNumber, setSelectedVehicleNumber] = useState('');
 
   // Driver login: vehicle, driver name & division (for pool vehicles) dropdowns
-  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [], divisions: [] });
+  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [], divisions: [], users: [] });
   const [driverOptionsLoaded, setDriverOptionsLoaded] = useState(false);
   const [selectedDriverVehicle, setSelectedDriverVehicle] = useState('');
   const [selectedDriverName, setSelectedDriverName] = useState('');
+  const [selectedSpecialUser, setSelectedSpecialUser] = useState('');
   const [selectedDivision, setSelectedDivision] = useState('');
   const [poolVehicleReason, setPoolVehicleReason] = useState('');
   const [driverSelectionConfirmed, setDriverSelectionConfirmed] = useState(false);
   const [driverOptionsError, setDriverOptionsError] = useState(null);
+  const [poolMeterRefreshKey, setPoolMeterRefreshKey] = useState(0);
+  const hasAutoFilledHire = useRef(false);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -230,6 +236,43 @@ function App() {
     loadOptions();
   }, [user]);
 
+  // Returning a pool vehicle: auto-fill division & reason from the person's OUT reading
+  useEffect(() => {
+    const personName = selectedDriverName === SPECIAL_USER_OPTION ? selectedSpecialUser : selectedDriverName;
+    const isPoolVehicle = driverOptions.vehicles.some(vehicle => (
+      vehicle.vehicleNumber === selectedDriverVehicle && vehicle.ownership === 'pool'
+    ));
+
+    if (driverSelectionConfirmed || !isPoolVehicle || !personName) return;
+
+    let isActive = true;
+
+    api.get(`/readings/${selectedDriverVehicle}`)
+      .then(res => {
+        if (!isActive) return;
+
+        const latest = res.data.find(reading => reading.meterType);
+        const isOutWithPerson = latest?.meterType === 'out'
+          && latest.driverName?.trim().toLowerCase() === personName.trim().toLowerCase();
+
+        if (isOutWithPerson) {
+          const divisionExists = driverOptions.divisions.some(division => division._id === latest.division);
+          setSelectedDivision(divisionExists ? latest.division : '');
+          setPoolVehicleReason(latest.reason || '');
+          hasAutoFilledHire.current = true;
+        } else if (hasAutoFilledHire.current) {
+          setSelectedDivision('');
+          setPoolVehicleReason('');
+          hasAutoFilledHire.current = false;
+        }
+      })
+      .catch(err => console.error('Failed to load current hire', err));
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedDriverVehicle, selectedDriverName, selectedSpecialUser, driverSelectionConfirmed, driverOptions]);
+
   const handleLogout = () => {
     localStorage.removeItem('authToken');
     window.history.replaceState({}, '', '/');
@@ -238,6 +281,7 @@ function App() {
     setSelectedVehicleNumber('');
     setSelectedDriverVehicle('');
     setSelectedDriverName('');
+    setSelectedSpecialUser('');
     setSelectedDivision('');
     setPoolVehicleReason('');
     setDriverSelectionConfirmed(false);
@@ -272,7 +316,9 @@ function App() {
   const isPoolVehicleSelected = driverOptions.vehicles.some(vehicle => (
     vehicle.vehicleNumber === selectedDriverVehicle && vehicle.ownership === 'pool'
   ));
-  const isDriverSelectionComplete = selectedDriverVehicle && selectedDriverName && (!isPoolVehicleSelected || (selectedDivision && poolVehicleReason.trim()));
+  const isSpecialUserSelected = selectedDriverName === SPECIAL_USER_OPTION;
+  const driverDisplayName = isSpecialUserSelected ? selectedSpecialUser : selectedDriverName;
+  const isDriverSelectionComplete = selectedDriverVehicle && driverDisplayName && (!isPoolVehicleSelected || (selectedDivision && poolVehicleReason.trim()));
   const selectedDivisionName = driverOptions.divisions.find(division => division._id === selectedDivision)?.name || '';
   const userVehicleOptions = getUserVehicleOptions(user);
   const selectedVehicleIsAssigned = userVehicleOptions.some(vehicle => vehicle.vehicleNumber === selectedVehicleNumber);
@@ -457,7 +503,10 @@ function App() {
                         <select
                           id="driverNameSelect"
                           value={selectedDriverName}
-                          onChange={e => setSelectedDriverName(e.target.value)}
+                          onChange={e => {
+                            setSelectedDriverName(e.target.value);
+                            setSelectedSpecialUser('');
+                          }}
                           className="input"
                         >
                           <option value="">— Select your name —</option>
@@ -466,8 +515,31 @@ function App() {
                               {d.employeeId} — {d.employeeName}
                             </option>
                           ))}
+                          <option value={SPECIAL_USER_OPTION}>Special User</option>
                         </select>
                       </div>
+
+                      {/* User dropdown (Special User only) */}
+                      {isSpecialUserSelected && (
+                        <div>
+                          <label htmlFor="specialUserSelect" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                            User: <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            id="specialUserSelect"
+                            value={selectedSpecialUser}
+                            onChange={e => setSelectedSpecialUser(e.target.value)}
+                            className="input"
+                          >
+                            <option value="">— Select the user —</option>
+                            {driverOptions.users.map(u => (
+                              <option key={u._id} value={u.name}>
+                                {u.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
                       {/* Division dropdown (pool vehicles only) */}
                       {isPoolVehicleSelected && (
@@ -530,7 +602,7 @@ function App() {
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Driver Workspace</p>
                     <h2 className="text-xl font-bold text-slate-900 mt-1">{selectedDriverVehicle}</h2>
-                    <p className="text-sm text-slate-500 mt-1">Driver: {selectedDriverName}</p>
+                    <p className="text-sm text-slate-500 mt-1">Driver: {driverDisplayName}</p>
                     {isPoolVehicleSelected && (
                       <>
                         <p className="text-sm text-slate-500 mt-1">Division: {selectedDivisionName}</p>
@@ -555,16 +627,25 @@ function App() {
                     <MeterCapture
                       key={`capture-driver-${selectedDriverVehicle}`}
                       vehicleId={selectedDriverVehicle}
-                      driverName={selectedDriverName}
+                      driverName={driverDisplayName}
                       divisionId={selectedDivision}
                       divisionName={selectedDivisionName}
                       reason={poolVehicleReason.trim()}
+                      onSaved={() => setPoolMeterRefreshKey(key => key + 1)}
                     />
                   </div>
 
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900 mb-4">History &amp; Stats</h2>
                     <ReadingHistory key={`history-driver-${selectedDriverVehicle}`} vehicleId={selectedDriverVehicle} />
+                    {isPoolVehicleSelected && (
+                      <PoolVehicleMeter
+                        key={`pool-meter-${selectedDriverVehicle}-${driverDisplayName}`}
+                        vehicleId={selectedDriverVehicle}
+                        driverName={driverDisplayName}
+                        refreshKey={poolMeterRefreshKey}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
