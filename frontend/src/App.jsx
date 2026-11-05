@@ -5,6 +5,7 @@ import AnalyticsDashboard from './components/AnalyticsDashboard';
 import CompanyDriverManagement from './components/CompanyDriverManagement';
 import DivisionManagement from './components/DivisionManagement';
 import EmployeeManagement from './components/EmployeeManagement';
+import FuelUsageDashboard from './components/FuelUsageDashboard';
 import LoginPage from './components/LoginPage';
 import MeterCapture from './components/MeterCapture';
 import PoolVehicleMeter from './components/PoolVehicleMeter';
@@ -71,6 +72,16 @@ const adminNavItems = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+      </svg>
+    )
+  },
+  {
+    id: 'fuelUsage',
+    label: 'Fuel Usage',
+    path: '/admin/fuel-usage',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 21V5a2 2 0 012-2h7a2 2 0 012 2v16M3 21h15M8 7h5v5H8zM16 8h2l2 2v7a2 2 0 01-2 2h-1" />
       </svg>
     )
   },
@@ -411,6 +422,8 @@ function App() {
                   <AnalyticsDashboard />
                 ) : adminPage === 'readings' ? (
                   <ReadingsAdmin />
+                ) : adminPage === 'fuelUsage' ? (
+                  <FuelUsageDashboard />
                 ) : (
                   <AdminDashboard />
                 )}
