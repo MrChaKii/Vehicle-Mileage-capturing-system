@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const User = require('./models/User');
+const FuelUsageBatch = require('./models/FuelUsageBatch');
 
 const app = express();
 
@@ -34,6 +35,12 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/vehicle-m
       await User.collection.dropIndex(uniqueUsernameIndex.name);
     }
 
+    const batchIndexes = await FuelUsageBatch.collection.indexes();
+    const uniqueFileHashIndex = batchIndexes.find(index => index.unique && index.key?.fileHash === 1);
+    if (uniqueFileHashIndex) {
+      await FuelUsageBatch.collection.dropIndex(uniqueFileHashIndex.name);
+    }
+
     console.log('MongoDB connected');
   })
   .catch(err => console.error('MongoDB error:', err));
@@ -46,6 +53,7 @@ app.use('/api/vehicles', require('./routes/vehicles'));
 app.use('/api/company-drivers', require('./routes/companyDrivers'));
 app.use('/api/divisions', require('./routes/divisions'));
 app.use('/api/readings', require('./routes/readings'));
+app.use('/api/fuel-usage', require('./routes/fuelUsage'));
 
 app.get('/api/health', (req, res) => {
   res.json({ 
