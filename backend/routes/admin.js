@@ -88,6 +88,7 @@ const createVehicleAnalyticsRow = (vehicle) => ({
   firstReadingDate: null,
   totalDistance: 0,
   monthDistance: 0,
+  monthUsageDates: new Set(),
   lastMileage: null,
   lastReadingDate: null,
   correctionCount: 0,
@@ -468,9 +469,7 @@ router.get('/analytics', async (req, res) => {
       CompanyDriver.countDocuments()
     ]);
 
-    const currentMonthStart = new Date();
-    currentMonthStart.setDate(1);
-    currentMonthStart.setHours(0, 0, 0, 0);
+    const currentMonthStart = parseRangeBoundary(`${getColomboDateKey(new Date()).slice(0, 7)}-01`);
 
     const userMap = new Map(users.map(user => [user._id.toString(), user]));
     const vehicleMap = new Map();
@@ -548,6 +547,10 @@ router.get('/analytics', async (req, res) => {
           if (readingDate >= currentMonthStart) {
             monthDistance += distance;
             vehicleStats.monthDistance += distance;
+
+            if (distance > 0) {
+              vehicleStats.monthUsageDates.add(getColomboDateKey(readingDate));
+            }
           }
         }
       }
@@ -556,10 +559,11 @@ router.get('/analytics', async (req, res) => {
     });
 
     const vehicleUsage = Array.from(vehicleMap.values())
-      .map(vehicle => ({
+      .map(({ monthUsageDates, ...vehicle }) => ({
         ...vehicle,
         totalDistance: Math.round(vehicle.totalDistance),
         monthDistance: Math.round(vehicle.monthDistance),
+        monthDaysUsed: monthUsageDates.size,
         averageConfidence: vehicle.readingCount ? vehicle.confidenceTotal / vehicle.readingCount : 0
       }))
       .sort((a, b) => b.totalDistance - a.totalDistance || a.vehicleNumber.localeCompare(b.vehicleNumber));
