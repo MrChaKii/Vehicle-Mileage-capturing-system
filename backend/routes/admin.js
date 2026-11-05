@@ -317,6 +317,7 @@ const createUserDailyUsage = (readings, userMap) => createVehicleAssignmentSessi
 */
 
 const dateInputPattern = /^\d{4}-\d{2}-\d{2}$/;
+const monthInputPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 const parseRangeBoundary = (value, endOfDay = false) => {
   if (!value || !dateInputPattern.test(value)) {
@@ -460,6 +461,12 @@ router.get('/analytics', async (req, res) => {
       return res.status(400).json({ error: 'End date must be on or after start date' });
     }
 
+    const requestedMonth = req.query.month?.trim();
+
+    if (requestedMonth && !monthInputPattern.test(requestedMonth)) {
+      return res.status(400).json({ error: 'Month must be in YYYY-MM format' });
+    }
+
     const [readings, vehicles, users, companyDriverCount] = await Promise.all([
       Reading.find()
         .sort({ vehicleId: 1, readingDate: 1 })
@@ -469,7 +476,10 @@ router.get('/analytics', async (req, res) => {
       CompanyDriver.countDocuments()
     ]);
 
-    const currentMonthStart = parseRangeBoundary(`${getColomboDateKey(new Date()).slice(0, 7)}-01`);
+    const selectedMonth = requestedMonth || getColomboDateKey(new Date()).slice(0, 7);
+    const [selectedYear, selectedMonthNumber] = selectedMonth.split('-').map(Number);
+    const selectedMonthStart = parseRangeBoundary(`${selectedMonth}-01`);
+    const nextMonthStart = parseRangeBoundary(new Date(Date.UTC(selectedYear, selectedMonthNumber, 1)).toISOString().slice(0, 10));
 
     const userMap = new Map(users.map(user => [user._id.toString(), user]));
     const vehicleMap = new Map();
@@ -544,7 +554,7 @@ router.get('/analytics', async (req, res) => {
           vehicleStats.totalDistance += distance;
           operatorStats.totalDistance += distance;
 
-          if (readingDate >= currentMonthStart) {
+          if (readingDate >= selectedMonthStart && readingDate < nextMonthStart) {
             monthDistance += distance;
             vehicleStats.monthDistance += distance;
 

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import api from '../api';
 
-const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason }) => {
+const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason, onSaved }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -12,6 +12,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [hasAnalyzedImage, setHasAnalyzedImage] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -109,6 +110,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason 
 
     const isCorrected = formData.originalMileage !== null && mileageNum !== formData.originalMileage;
 
+    setSaving(true);
     try {
       const payload = {
         vehicleId,
@@ -136,15 +138,19 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason 
         );
       }
 
-      await api.post('/readings', payload);
-      
-      setSuccess(true);
+      const res = await api.post('/readings', payload);
+      const meterType = res.data.reading?.meterType;
+
+      setSuccess(meterType ? `${meterType.toUpperCase()} Reading Saved!` : 'Reading Saved!');
+      onSaved?.();
       setTimeout(() => {
         resetAll();
         setSuccess(false);
       }, 2000);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save reading');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -173,7 +179,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason 
       {/* Success Toast */}
       {success && (
         <div className="fixed top-4 right-4 z-50 bg-emerald-500 text-white px-6 py-3 rounded-lg shadow-lg animate-bounce">
-          ✅ Reading Saved!
+          ✅ {success}
         </div>
       )}
 
@@ -381,7 +387,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason 
             <button onClick={resetAll} className="btn-secondary flex-1">
               ↺ Retake Photo
             </button>
-            <button onClick={submitReading} className="btn-primary flex-1">
+            <button onClick={submitReading} disabled={saving || Boolean(success)} className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed">
               ✓ Confirm & Save
             </button>
           </div>

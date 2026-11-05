@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import api from '../api';
 
 const formatNumber = (value) => Math.round(value || 0).toLocaleString();
@@ -38,6 +38,10 @@ const getDateInputValue = (date) => {
 
   return `${year}-${month}-${day}`;
 };
+
+const getCurrentMonth = () => getDateInputValue(new Date()).slice(0, 7);
+
+const isSelectableMonth = (value) => /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value <= getCurrentMonth();
 
 const getDefaultDateRange = () => {
   const today = new Date();
@@ -239,6 +243,12 @@ const DateRangeFilter = ({ filters, onChange, onSubmit, error, searching }) => (
 
 const AnalyticsDashboard = () => {
   const [analytics, setAnalytics] = useState(null);
+  const [poolVehicleUsage, setPoolVehicleUsage] = useState([]);
+  const [poolMonth, setPoolMonth] = useState(() => getCurrentMonth());
+  const [poolMonthInput, setPoolMonthInput] = useState(() => getCurrentMonth());
+  const [poolLoading, setPoolLoading] = useState(true);
+  const [poolError, setPoolError] = useState('');
+  const poolRequestId = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reportFilters, setReportFilters] = useState(() => getDefaultDateRange());
@@ -273,6 +283,37 @@ const AnalyticsDashboard = () => {
     }
   }, []);
 
+  const fetchPoolVehicleUsage = useCallback(async (month) => {
+    const requestId = ++poolRequestId.current;
+    setPoolLoading(true);
+    setPoolError('');
+
+    try {
+      const res = await api.get('/admin/analytics', { params: { month } });
+      if (requestId !== poolRequestId.current) {
+        return;
+      }
+      setPoolVehicleUsage(
+        (res.data.vehicleUsage || [])
+          .filter(vehicle => vehicle.ownership === 'pool')
+          .sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber))
+      );
+    } catch (err) {
+      if (requestId === poolRequestId.current) {
+        setPoolError(err.response?.data?.error || 'Failed to load pool vehicle usage');
+      }
+    } finally {
+      if (requestId === poolRequestId.current) {
+        setPoolLoading(false);
+      }
+    }
+  }, []);
+
+  const refreshAnalytics = () => {
+    fetchAnalytics();
+    fetchPoolVehicleUsage(poolMonth);
+  };
+
   const fetchRangeUsage = useCallback(async (range) => {
     const res = await api.get('/admin/analytics', { params: range });
     return res.data.rangeUsage || [];
@@ -302,6 +343,12 @@ const AnalyticsDashboard = () => {
       window.clearInterval(refreshTimer);
     };
   }, [fetchAnalytics, fetchRangeUsage]);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => fetchPoolVehicleUsage(poolMonth), 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, [fetchPoolVehicleUsage, poolMonth]);
 
   const searchRange = async (event, section, filters, setRows, setSectionError, setAppliedRange) => {
     event.preventDefault();
@@ -336,9 +383,6 @@ const AnalyticsDashboard = () => {
     [...(analytics?.vehicleUsage || [])]
       .sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber))
   ), [analytics]);
-  const poolVehicleUsage = useMemo(() => (
-    currentVehicleMileage.filter(vehicle => vehicle.ownership === 'pool')
-  ), [currentVehicleMileage]);
   const reportSummary = useMemo(() => summarizeUsage(reportUsage), [reportUsage]);
   const contributionSummary = useMemo(() => summarizeUsage(contributionUsage), [contributionUsage]);
   const reportDistance = reportUsage.reduce((total, row) => total + row.distance, 0);
@@ -364,7 +408,7 @@ const AnalyticsDashboard = () => {
     return (
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
         <p className="text-red-700 font-medium">{error}</p>
-        <button onClick={() => fetchAnalytics()} className="btn-primary mt-4">Retry</button>
+        <button onClick={refreshAnalytics} className="btn-primary mt-4">Retry</button>
       </div>
     );
   }
@@ -383,7 +427,7 @@ const AnalyticsDashboard = () => {
           <p className="text-xs text-slate-400">
             Updated {analytics?.generatedAt ? new Date(analytics.generatedAt).toLocaleString() : '-'}
           </p>
-          <button onClick={() => fetchAnalytics()} className="btn-secondary self-start sm:self-auto">
+          <button onClick={refreshAnalytics} className="btn-secondary self-start sm:self-auto">
             <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582M20 20v-5h-.581M5.635 15A8 8 0 1118.364 8.636" />
             </svg>
@@ -475,25 +519,42 @@ const AnalyticsDashboard = () => {
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-semibold text-slate-950">Monthly pool vehicle usage</h3>
             </div>
-            <p className="text-sm text-slate-500 mt-1">This month's total mileage, number of days used, and average mileage per day for each pool vehicle.</p>
+            <p className="text-sm text-slate-500 mt-1">Total mileage, number of days used, and average mileage per day for each pool vehicle in the selected month.</p>
           </div>
-
+          <input
+            type="month"
+            aria-label="Select month"
+            value={poolMonthInput}
+            max={getCurrentMonth()}
+            onChange={event => {
+              setPoolMonthInput(event.target.value);
+              if (isSelectableMonth(event.target.value)) {
+                setPoolMonth(event.target.value);
+              }
+            }}
+            onBlur={() => setPoolMonthInput(poolMonth)}
+            className="input h-10 sm:w-44 shrink-0"
+          />
         </div>
 
-        {poolVehicleUsage.length === 0 ? (
+        {poolError ? (
+          <p className="px-6 py-5 text-sm text-red-700">{poolError}</p>
+        ) : poolLoading && poolVehicleUsage.length === 0 ? (
+          <p className="px-6 py-5 text-sm text-slate-500">Loading pool vehicle usage...</p>
+        ) : poolVehicleUsage.length === 0 ? (
           <EmptyState title="No pool vehicles" text="Registered pool vehicles will appear here automatically." />
         ) : (
-          <div className="grid grid-cols-2 gap-y-4 gap-x-10 p-6">
+          <div className={`grid grid-cols-2 gap-y-4 gap-x-10 p-6 transition-opacity ${poolLoading ? 'opacity-50' : ''}`}>
             {poolVehicleUsage.map(vehicle => (
               <div key={vehicle.vehicleNumber} className="min-w-0 rounded-lg bg-slate-50 border border-slate-200 p-4">
                 <p className="font-mono text-sm font-bold text-brand-700 truncate">{vehicle.vehicleNumber}</p>
                 <p className="text-xs text-slate-500 mt-1 truncate">{[vehicle.make, vehicle.name, vehicle.model].filter(Boolean).join(' ') || 'Vehicle details unavailable'}</p>
                 <p className="text-2xl font-bold text-slate-950 mt-4">{formatKm(vehicle.monthDistance)}</p>
-                <p className="text-xs text-slate-500 mt-1">Total mileage this month</p>
+                <p className="text-xs text-slate-500 mt-1">Total mileage for the month</p>
                 <div className="grid grid-cols-2 gap-3 mt-4">
                   <div>
                     <p className="text-sm font-semibold text-slate-950">{formatNumber(vehicle.monthDaysUsed)}</p>
-                    <p className="text-xs text-slate-500 mt-0.5">Days used this month</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Days used</p>
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-slate-950">{formatKm(vehicle.monthDaysUsed ? vehicle.monthDistance / vehicle.monthDaysUsed : 0)}</p>
