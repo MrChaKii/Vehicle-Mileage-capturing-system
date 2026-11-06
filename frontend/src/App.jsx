@@ -98,16 +98,24 @@ const adminNavItems = [
 ];
 
 const divisionPaths = ['/admin/division', '/admin/divisions', '/admin/division-management', '/admin/divisionManagement'];
+const superAdminNavItems = adminNavItems.map(item => ({
+  ...item,
+  path: item.path.replace('/admin/', '/superadmin/')
+}));
+const superAdminDivisionPaths = [
+  '/superadmin/division',
+  '/superadmin/divisions',
+  '/superadmin/division-management',
+  '/superadmin/divisionManagement'
+];
 
 const getAdminPageFromPath = (pathname) => {
-  if (divisionPaths.includes(pathname)) {
+  if (divisionPaths.includes(pathname) || superAdminDivisionPaths.includes(pathname)) {
     return 'divisions';
   }
 
-  return adminNavItems.find(item => item.path === pathname)?.id || 'dashboard';
+  return [...adminNavItems, ...superAdminNavItems].find(item => item.path === pathname)?.id || 'dashboard';
 };
-
-const isAdminPath = (pathname) => adminNavItems.some(item => item.path === pathname) || divisionPaths.includes(pathname);
 
 const isSuperAdminRole = (role) => ['superadmin', 'super_admin', 'super admin', 'super-admin'].includes(role);
 
@@ -115,7 +123,7 @@ const hasAdminAccess = (role) => role === 'admin' || isSuperAdminRole(role);
 
 const getAllowedAdminPaths = (role) => {
   if (isSuperAdminRole(role)) {
-    return adminNavItems.map(item => item.path).concat(divisionPaths);
+    return superAdminNavItems.map(item => item.path).concat(superAdminDivisionPaths, adminNavItems.map(item => item.path), divisionPaths);
   }
 
   return adminNavItems
@@ -123,7 +131,12 @@ const getAllowedAdminPaths = (role) => {
     .map(item => item.path);
 };
 
-const getDefaultAdminPath = (role) => (isSuperAdminRole(role) ? '/admin/dashboard' : '/admin/analytics');
+const getAdminPathForPage = (page, role) => {
+  const navItems = isSuperAdminRole(role) ? superAdminNavItems : adminNavItems;
+  return navItems.find(item => item.id === page)?.path || (isSuperAdminRole(role) ? '/superadmin/divisions' : '/admin/divisions');
+};
+
+const getDefaultAdminPath = (role) => (isSuperAdminRole(role) ? '/superadmin/dashboard' : '/admin/analytics');
 
 const isAllowedAdminPath = (pathname, role) => getAllowedAdminPaths(role).includes(pathname);
 
@@ -217,12 +230,18 @@ function App() {
     }
 
     if (hasAdminAccess(user.role)) {
-      if (!isAllowedAdminPath(window.location.pathname, user.role)) {
+      const currentPath = window.location.pathname;
+      if (!isAllowedAdminPath(currentPath, user.role)) {
         const defaultPath = getDefaultAdminPath(user.role);
         window.history.replaceState({}, '', defaultPath);
         setAdminPage(getAdminPageFromPath(defaultPath));
       } else {
-        setAdminPage(getAdminPageFromPath(window.location.pathname));
+        const page = getAdminPageFromPath(currentPath);
+        const canonicalPath = getAdminPathForPage(page, user.role);
+        if (currentPath !== canonicalPath) {
+          window.history.replaceState({}, '', canonicalPath);
+        }
+        setAdminPage(page);
       }
     }
 
@@ -379,10 +398,13 @@ function App() {
             <aside className="bg-white border-b border-slate-200 lg:w-64 lg:border-b-0 lg:border-r lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)]">
               <div className="px-4 sm:px-6 lg:px-4 py-4 lg:py-6">
                 <div className="hidden lg:block mb-6">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Admin Menu</p>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{isSuperAdmin ? 'Super Admin Menu' : 'Admin Menu'}</p>
                 </div>
                 <nav className="flex lg:flex-col gap-2 overflow-x-auto">
-                  {adminNavItems.filter(item => isSuperAdmin ? true : item.id !== 'dashboard' && item.id !== 'divisions').map(item => {
+                  {(isSuperAdmin
+                    ? superAdminNavItems
+                    : adminNavItems.filter(item => item.id !== 'dashboard' && item.id !== 'divisions')
+                  ).map(item => {
                     const isActive = adminPage === item.id;
 
                     return (

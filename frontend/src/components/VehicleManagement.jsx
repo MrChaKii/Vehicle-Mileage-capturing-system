@@ -609,6 +609,7 @@ const VehicleManagement = () => {
                       <option value="petrol">Petrol</option>
                       <option value="diesel">Diesel</option>
                       <option value="hybrid">Hybrid</option>
+                      <option value="electric">Electric</option>
                     </select>
                   </div>
                   <div>
