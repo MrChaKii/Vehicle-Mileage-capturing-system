@@ -38,6 +38,24 @@ const CorrectedBadge = ({ value }) =>
     </span>
   );
 
+const ReadingTime = ({ value }) => (
+  <>
+    <span className="block text-sm font-semibold text-slate-900">
+      {new Date(value).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}
+    </span>
+    <span className="block text-xs text-slate-400 mt-0.5">
+      {new Date(value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+    </span>
+  </>
+);
+
+const Kilometers = ({ value, className = 'text-slate-900' }) => (
+  <>
+    <span className={`font-mono text-sm font-bold ${className}`}>{value?.toLocaleString()}</span>
+    <span className="text-xs text-slate-400 ml-1">km</span>
+  </>
+);
+
 // ─── CSV Export ───────────────────────────────────────────────────────────────
 function exportToCSV(readings) {
   const headers = [
@@ -93,6 +111,9 @@ const ReadingsAdmin = () => {
   const [editMileage, setEditMileage] = useState('');
   const [deletingReading, setDeletingReading] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [irregularReadings, setIrregularReadings] = useState([]);
+  const [irregularLoading, setIrregularLoading] = useState(true);
+  const [irregularError, setIrregularError] = useState('');
 
   // Filters
   const [vehicles, setVehicles] = useState([]);
@@ -141,6 +162,24 @@ const ReadingsAdmin = () => {
       setLoading(false);
     }
   }, [buildParams]);
+
+  const fetchIrregularReadings = useCallback(async () => {
+    try {
+      const res = await api.get('/readings/irregular-pool');
+      setIrregularReadings(res.data);
+      setIrregularError('');
+    } catch (err) {
+      setIrregularError(err.response?.data?.error || 'Failed to load irregular pool meter readings.');
+    } finally {
+      setIrregularLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(fetchIrregularReadings, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, [fetchIrregularReadings]);
 
   // Debounced re-fetch when filters change
   useEffect(() => {
@@ -192,7 +231,7 @@ const ReadingsAdmin = () => {
     try {
       await api.put(`/readings/${editingReading._id}`, { mileage: Number(editMileage) });
       closeEditModal();
-      await fetchReadings(page);
+      await Promise.all([fetchReadings(page), fetchIrregularReadings()]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to update reading');
     } finally {
@@ -207,7 +246,7 @@ const ReadingsAdmin = () => {
     try {
       await api.delete(`/readings/${deletingReading._id}`);
       setDeletingReading(null);
-      await fetchReadings(page);
+      await Promise.all([fetchReadings(page), fetchIrregularReadings()]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to delete reading');
     } finally {
@@ -278,7 +317,10 @@ const ReadingsAdmin = () => {
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
-            onClick={() => fetchReadings(page)}
+            onClick={() => {
+              fetchReadings(page);
+              fetchIrregularReadings();
+            }}
             className="btn-secondary"
             title="Refresh"
           >
@@ -750,6 +792,73 @@ const ReadingsAdmin = () => {
             >
               Next →
             </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Irregular Pool Meter Readings ── */}
+      <div className="card overflow-hidden p-0">
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h3 className="text-lg font-semibold text-slate-900">Irregular Pool Meter Readings</h3>
+          <p className="text-sm text-slate-500 mt-1">
+            OUT readings more than 1 km above the pool vehicle's previous IN reading.
+          </p>
+        </div>
+
+        {irregularLoading ? (
+          <p className="px-6 py-8 text-sm text-slate-500">Loading…</p>
+        ) : irregularError ? (
+          <div className="px-6 py-8">
+            <p className="text-sm text-red-600 font-medium mb-3" role="alert">{irregularError}</p>
+            <button onClick={fetchIrregularReadings} className="btn-secondary text-sm">
+              Retry
+            </button>
+          </div>
+        ) : irregularReadings.length === 0 ? (
+          <p className="px-6 py-8 text-sm text-slate-500">No irregular pool meter readings.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-slate-50/80 border-b border-slate-200">
+                  {[
+                    ['Vehicle', 'text-left'],
+                    ['In Meter', 'text-right'],
+                    ['In Time', 'text-left'],
+                    ['In Driver', 'text-left'],
+                    ['Out Meter', 'text-right'],
+                    ['Out Time', 'text-left'],
+                    ['Out Driver', 'text-left'],
+                    ['Gap', 'text-right'],
+                  ].map(([heading, align]) => (
+                    <th
+                      key={heading}
+                      className={`${align} text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3 whitespace-nowrap first:pl-6 last:pr-6`}
+                    >
+                      {heading}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {irregularReadings.map(row => (
+                  <tr key={row._id} className="hover:bg-indigo-50/20 transition-colors duration-100">
+                    <td className="pl-6 pr-4 py-3.5 whitespace-nowrap">
+                      <span className="font-mono text-sm font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                        {row.vehicleId}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap"><Kilometers value={row.inMeter} /></td>
+                    <td className="px-4 py-3.5 whitespace-nowrap"><ReadingTime value={row.inTime} /></td>
+                    <td className="px-4 py-3.5 text-sm text-slate-700 whitespace-nowrap">{row.inDriver || '—'}</td>
+                    <td className="px-4 py-3.5 text-right whitespace-nowrap"><Kilometers value={row.outMeter} /></td>
+                    <td className="px-4 py-3.5 whitespace-nowrap"><ReadingTime value={row.outTime} /></td>
+                    <td className="px-4 py-3.5 text-sm text-slate-700 whitespace-nowrap">{row.outDriver || '—'}</td>
+                    <td className="pl-4 pr-6 py-3.5 text-right whitespace-nowrap"><Kilometers value={row.gap} className="text-red-600" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

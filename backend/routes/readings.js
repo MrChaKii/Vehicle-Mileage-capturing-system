@@ -13,6 +13,8 @@ const { authenticate, authorizeRoles } = require('../middleware/auth');
 // CRITICAL: Store file in memory only, never on disk
 const upload = multer({ storage: multer.memoryStorage() });
 
+const MAX_POOL_IN_TO_OUT_GAP_KM = 1;
+
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const getOcrExtractUrl = () => {
@@ -145,6 +147,12 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Pool vehicles: last IN and next OUT should be at most 1km apart.
+    // A larger gap is informational only; the reading is still saved.
+    const exceedsPoolGap = meterType === 'out'
+      && lastReading?.meterType === 'in'
+      && mileage - lastReading.extractedMileage > MAX_POOL_IN_TO_OUT_GAP_KM;
+
     const reading = new Reading({
       vehicleId: vehicleId.toUpperCase().trim(),
       extractedMileage: mileage,
@@ -171,7 +179,10 @@ router.post('/', async (req, res) => {
         mileage: reading.extractedMileage,
         date: reading.readingDate,
         meterType: reading.meterType
-      }
+      },
+      ...(exceedsPoolGap && {
+        warning: `Your OUT meter is more than ${MAX_POOL_IN_TO_OUT_GAP_KM} km larger than the last IN meter reading for this vehicle.`
+      })
     });
 
   } catch (error) {
@@ -284,6 +295,46 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Admin readings list error:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/readings/irregular-pool — Pool OUT readings too far above the previous IN (must be BEFORE /:vehicleId)
+router.get('/irregular-pool', authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'), async (req, res) => {
+  try {
+    const vehicleIds = await Reading.distinct('vehicleId', { meterType: 'in' });
+    const readings = await Reading.find({ vehicleId: { $in: vehicleIds } })
+      .sort({ vehicleId: 1, readingDate: 1 })
+      .select('vehicleId extractedMileage readingDate driverName meterType')
+      .lean();
+
+    const rows = [];
+    readings.forEach((outReading, index) => {
+      const inReading = readings[index - 1];
+      if (
+        inReading?.vehicleId === outReading.vehicleId
+        && inReading.meterType === 'in'
+        && outReading.meterType === 'out'
+        && outReading.extractedMileage - inReading.extractedMileage > MAX_POOL_IN_TO_OUT_GAP_KM
+      ) {
+        rows.push({
+          _id: outReading._id,
+          vehicleId: outReading.vehicleId,
+          inMeter: inReading.extractedMileage,
+          inTime: inReading.readingDate,
+          inDriver: inReading.driverName,
+          outMeter: outReading.extractedMileage,
+          outTime: outReading.readingDate,
+          outDriver: outReading.driverName,
+          gap: outReading.extractedMileage - inReading.extractedMileage
+        });
+      }
+    });
+
+    rows.sort((left, right) => new Date(right.outTime) - new Date(left.outTime));
+    res.json(rows);
+  } catch (error) {
+    console.error('Irregular pool readings error:', error);
+    res.status(500).json({ error: 'Failed to load irregular pool readings' });
   }
 });
 
