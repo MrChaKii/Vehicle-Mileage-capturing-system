@@ -12,6 +12,9 @@ const fuelTypes = ['petrol', 'diesel', 'hybrid', 'electric'];
 
 const toDateOrNull = (value) => value ? new Date(value) : null;
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const toUtcDay = (date) => Math.floor(new Date(date).getTime() / MS_PER_DAY);
+
 const normalizeEngineCapacity = (value) => {
   const normalized = value == null ? '' : String(value).trim().toLowerCase();
   const match = normalized.match(/^(\d{1,4})\s*(?:cc)?$/);
@@ -65,6 +68,14 @@ const validateVehicle = async (
 
     if (payload.manufacturingYear < 1900 || payload.manufacturingYear > 2100) {
       return 'Please enter a valid manufacturing year';
+    }
+
+    if (
+      payload.dateOfPurchasing
+      && payload.dateOfUserAllocation
+      && toUtcDay(payload.dateOfUserAllocation) < toUtcDay(payload.dateOfPurchasing)
+    ) {
+      return 'Date of user allocation cannot be before the date of purchasing';
     }
   }
 

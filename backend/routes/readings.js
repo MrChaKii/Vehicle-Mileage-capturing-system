@@ -37,8 +37,13 @@ router.use(authenticate);
 // GET /api/readings/options — Return vehicles, company drivers, divisions, and users for driver login dropdowns
 router.get('/options', async (req, res) => {
   try {
+    const vehicleFilter = { status: 'active' };
+    if (req.user.role === 'driver') {
+      vehicleFilter.ownership = 'pool';
+    }
+
     const [vehicles, companyDrivers, divisions, users] = await Promise.all([
-      Vehicle.find({ status: 'active' }).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership'),
+      Vehicle.find(vehicleFilter).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership'),
       CompanyDriver.find().sort({ employeeName: 1 }).select('employeeId employeeName'),
       Division.find().sort({ name: 1 }).select('name'),
       User.find({ role: 'user', isActive: true }).sort({ name: 1 }).select('name')

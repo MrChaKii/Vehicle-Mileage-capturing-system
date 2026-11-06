@@ -329,7 +329,7 @@ function App() {
   ));
   const isSpecialUserSelected = selectedDriverName === SPECIAL_USER_OPTION;
   const driverDisplayName = isSpecialUserSelected ? selectedSpecialUser : selectedDriverName;
-  const isDriverSelectionComplete = selectedDriverVehicle && driverDisplayName && (!isPoolVehicleSelected || (selectedDivision && poolVehicleReason.trim()));
+  const isDriverSelectionComplete = selectedDriverVehicle && driverDisplayName && selectedDivision && poolVehicleReason.trim();
   const selectedDivisionName = driverOptions.divisions.find(division => division._id === selectedDivision)?.name || '';
   const userVehicleOptions = getUserVehicleOptions(user);
   const selectedVehicleIsAssigned = userVehicleOptions.some(vehicle => vehicle.vehicleNumber === selectedVehicleNumber);
@@ -441,9 +441,7 @@ function App() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Driver Workspace</p>
                     <h2 className="text-xl font-bold text-slate-900">Before You Scan</h2>
                     <p className="text-sm text-slate-500 mt-1">
-                      {isPoolVehicleSelected
-                        ? 'Select vehicle, name, division, and provide reason to continue.'
-                        : 'Select your vehicle and name to continue.'}
+                      Select vehicle, name, division, and provide reason to continue.
                     </p>
                   </div>
 
@@ -489,14 +487,7 @@ function App() {
                         <select
                           id="driverVehicleSelect"
                           value={selectedDriverVehicle}
-                          onChange={e => {
-                            const vehicle = driverOptions.vehicles.find(v => v.vehicleNumber === e.target.value);
-                            setSelectedDriverVehicle(e.target.value);
-                            if (vehicle?.ownership !== 'pool') {
-                              setSelectedDivision('');
-                              setPoolVehicleReason('');
-                            }
-                          }}
+                          onChange={e => setSelectedDriverVehicle(e.target.value)}
                           className="input"
                         >
                           <option value="">— Select a vehicle —</option>
@@ -554,45 +545,41 @@ function App() {
                         </div>
                       )}
 
-                      {/* Division dropdown (pool vehicles only) */}
-                      {isPoolVehicleSelected && (
-                        <div>
-                          <label htmlFor="divisionSelect" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                            Division <span className="text-red-500">*</span>
-                          </label>
-                          <select
-                            id="divisionSelect"
-                            value={selectedDivision}
-                            onChange={e => setSelectedDivision(e.target.value)}
-                            className="input"
-                          >
-                            <option value="">— Select the division —</option>
-                            {driverOptions.divisions.map(d => (
-                              <option key={d._id} value={d._id}>
-                                {d.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                      {/* Division dropdown */}
+                      <div>
+                        <label htmlFor="divisionSelect" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                          Division <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          id="divisionSelect"
+                          value={selectedDivision}
+                          onChange={e => setSelectedDivision(e.target.value)}
+                          className="input"
+                        >
+                          <option value="">— Select the division —</option>
+                          {driverOptions.divisions.map(d => (
+                            <option key={d._id} value={d._id}>
+                              {d.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                      {/* Reason text box (pool vehicles only) */}
-                      {isPoolVehicleSelected && (
-                        <div>
-                          <label htmlFor="poolVehicleReason" className="block text-sm font-semibold text-slate-700 mb-1.5">
-                            Reason <span className="text-red-500">*</span>
-                          </label>
-                          <textarea
-                            id="poolVehicleReason"
-                            rows={2}
-                            maxLength={120}
-                            value={poolVehicleReason}
-                            onChange={e => setPoolVehicleReason(e.target.value)}
-                            placeholder="Enter your reason for using this vehicle"
-                            className="input"
-                          />
-                        </div>
-                      )}
+                      {/* Reason text box */}
+                      <div>
+                        <label htmlFor="poolVehicleReason" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                          Reason <span className="text-red-500">*</span>
+                        </label>
+                        <textarea
+                          id="poolVehicleReason"
+                          rows={2}
+                          maxLength={120}
+                          value={poolVehicleReason}
+                          onChange={e => setPoolVehicleReason(e.target.value)}
+                          placeholder="Enter your reason for using this vehicle"
+                          className="input"
+                        />
+                      </div>
 
                       <button
                         onClick={() => {
@@ -650,7 +637,6 @@ function App() {
 
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900 mb-4">History &amp; Stats</h2>
-                    <ReadingHistory key={`history-driver-${selectedDriverVehicle}`} vehicleId={selectedDriverVehicle} />
                     {isPoolVehicleSelected && (
                       <PoolVehicleMeter
                         key={`pool-meter-${selectedDriverVehicle}-${driverDisplayName}`}
@@ -659,6 +645,7 @@ function App() {
                         refreshKey={poolMeterRefreshKey}
                       />
                     )}
+                    <ReadingHistory key={`history-driver-${selectedDriverVehicle}`} vehicleId={selectedDriverVehicle} />
                   </div>
                 </div>
               </div>
