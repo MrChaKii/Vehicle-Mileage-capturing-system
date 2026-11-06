@@ -697,20 +697,22 @@ const AnalyticsDashboard = () => {
             </div>
             <p className="text-sm text-slate-500 mt-1">Total mileage, number of days used, and average mileage per day for each pool vehicle in the selected month.</p>
           </div>
-          <input
-            type="month"
-            aria-label="Select month"
-            value={poolMonthInput}
-            max={getCurrentMonth()}
-            onChange={event => {
-              setPoolMonthInput(event.target.value);
-              if (isSelectableMonth(event.target.value)) {
-                setPoolMonth(event.target.value);
-              }
-            }}
-            onBlur={() => setPoolMonthInput(poolMonth)}
-            className="input h-10 sm:w-44 shrink-0"
-          />
+          <label className="text-xs font-semibold text-slate-500 shrink-0">
+            Select month
+            <input
+              type="month"
+              value={poolMonthInput}
+              max={getCurrentMonth()}
+              onChange={event => {
+                setPoolMonthInput(event.target.value);
+                if (isSelectableMonth(event.target.value)) {
+                  setPoolMonth(event.target.value);
+                }
+              }}
+              onBlur={() => setPoolMonthInput(poolMonth)}
+              className="input mt-1 min-w-40"
+            />
+          </label>
         </div>
 
         {poolError ? (

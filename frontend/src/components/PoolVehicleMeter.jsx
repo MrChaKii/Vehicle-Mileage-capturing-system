@@ -58,7 +58,7 @@ const PoolVehicleMeter = ({ vehicleId, driverName, refreshKey }) => {
   }
 
   return (
-    <div className="card overflow-hidden mt-6">
+    <div className="card overflow-hidden mb-6">
       <h3 className="text-lg font-semibold text-slate-900 mb-4">Pool Vehicle Meter</h3>
 
       {error ? (

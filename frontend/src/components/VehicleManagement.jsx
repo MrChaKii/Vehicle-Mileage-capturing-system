@@ -174,6 +174,13 @@ const VehicleManagement = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Both values are YYYY-MM-DD strings, so they compare correctly as text.
+  const isAllocationBeforePurchase = Boolean(
+    formData.dateOfPurchasing
+    && formData.dateOfUserAllocation
+    && formData.dateOfUserAllocation < formData.dateOfPurchasing
+  );
+
   const fetchDivisions = async () => {
     try {
       const res = await api.get('/divisions');
@@ -696,6 +703,11 @@ const VehicleManagement = () => {
                         className="input disabled:bg-slate-100 disabled:text-slate-500"
                         disabled={Boolean(editingId)}
                       />
+                      {isAllocationBeforePurchase && (
+                        <p className="text-sm text-red-600 mt-1.5" role="alert">
+                          Date of user allocation cannot be earlier than the the purchase date.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -705,7 +717,7 @@ const VehicleManagement = () => {
                 <button type="button" onClick={closeModal} className="btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" disabled={saving} className="btn-primary min-w-36">
+                <button type="submit" disabled={saving || isAllocationBeforePurchase} className="btn-primary min-w-36 disabled:opacity-50 disabled:cursor-not-allowed">
                   {saving ? 'Saving...' : editingId ? 'Update Vehicle' : 'Create Vehicle'}
                 </button>
               </div>
