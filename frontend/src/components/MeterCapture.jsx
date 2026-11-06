@@ -12,6 +12,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
+  const [saveWarning, setSaveWarning] = useState(null);
   const [saving, setSaving] = useState(false);
   const [hasAnalyzedImage, setHasAnalyzedImage] = useState(false);
   
@@ -111,6 +112,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
     const isCorrected = formData.originalMileage !== null && mileageNum !== formData.originalMileage;
 
     setSaving(true);
+    setSaveWarning(null);
     try {
       const payload = {
         vehicleId,
@@ -142,6 +144,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
       const meterType = res.data.reading?.meterType;
 
       setSuccess(meterType ? `${meterType.toUpperCase()} Reading Saved!` : 'Reading Saved!');
+      setSaveWarning(res.data.warning || null);
       onSaved?.();
       setTimeout(() => {
         resetAll();
@@ -180,6 +183,20 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
       {success && (
         <div className="fixed top-4 right-4 z-50 bg-emerald-500 text-white px-6 py-3 rounded-lg shadow-lg animate-bounce">
           ✅ {success}
+        </div>
+      )}
+
+      {/* Informational only: the reading has already been saved */}
+      {saveWarning && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 flex items-start justify-between gap-3" role="alert">
+          <p>{saveWarning}</p>
+          <button
+            type="button"
+            onClick={() => setSaveWarning(null)}
+            className="shrink-0 font-medium underline hover:text-red-800"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
