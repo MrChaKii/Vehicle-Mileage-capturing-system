@@ -430,12 +430,34 @@ const AnalyticsDashboard = () => {
   const reportUsers = reportSummary.length;
   const reportVehicles = new Set(reportUsage.map(row => row.vehicleNumber)).size;
   const averageGapDistance = reportUsage.length ? reportDistance / reportUsage.length : 0;
+  const divisionFuelUsage = useMemo(() => {
+    const divisions = new Map();
+
+    (fuelTypeSummary?.perVehicle || []).forEach(row => {
+      const division = row.division || 'Unassigned';
+      const current = divisions.get(division) || {
+        division,
+        liters: 0,
+        amount: 0,
+        vehicles: new Set()
+      };
+
+      current.liters += Number(row.liters) || 0;
+      current.amount += Number(row.amount) || 0;
+      current.vehicles.add(row.vehicleNumber);
+      divisions.set(division, current);
+    });
+
+    return Array.from(divisions.values())
+      .map(row => ({ ...row, vehicles: row.vehicles.size }))
+      .sort((left, right) => right.liters - left.liters || left.division.localeCompare(right.division));
+  }, [fuelTypeSummary]);
   const fuelTypePanel = (
     <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-950">Fuel usage by type</h3>
-          <p className="text-sm text-slate-500 mt-1">Monthly fuel liters and amount from the uploaded fuel report.</p>
+          <h3 className="text-lg font-semibold text-slate-950">Monthly fuel usage</h3>
+          <p className="text-sm text-slate-500 mt-1">Fuel totals by type and division from the uploaded fuel report.</p>
         </div>
         <label className="text-xs font-semibold text-slate-500">
           Report month
@@ -485,6 +507,54 @@ const AnalyticsDashboard = () => {
               </tr>
             </tfoot>
           </table>
+        </div>
+      )}
+      {!fuelTypeError && !(fuelTypeLoading && !fuelTypeSummary) && (
+        <div className="border-t border-slate-200">
+          <div className="px-6 py-4">
+            <h4 className="text-base font-semibold text-slate-950">Fuel usage by division</h4>
+            <p className="text-sm text-slate-500 mt-1">Liters and amount summed from vehicle-level fuel transactions.</p>
+          </div>
+          {divisionFuelUsage.length === 0 ? (
+            <p className="px-6 pb-5 text-sm text-slate-500">No vehicle-level fuel usage recorded for {fuelTypeMonth}.</p>
+          ) : (
+            <div className={`overflow-x-auto transition-opacity ${fuelTypeLoading ? 'opacity-50' : ''}`}>
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-slate-50 border-y border-slate-200">
+                    <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Division</th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Vehicles</th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Liters</th>
+                    <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wider">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {divisionFuelUsage.map(item => (
+                    <tr key={item.division} className="hover:bg-slate-50">
+                      <td className="px-6 py-3 text-sm font-medium text-slate-900">{item.division}</td>
+                      <td className="px-6 py-3 text-right font-mono text-sm text-slate-700">{formatNumber(item.vehicles)}</td>
+                      <td className="px-6 py-3 text-right font-mono text-sm text-slate-700">{formatFuelNumber(item.liters)}</td>
+                      <td className="px-6 py-3 text-right font-mono text-sm text-slate-700">{formatFuelAmount(item.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-50 border-t border-slate-200">
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-slate-900">Total</th>
+                    <th className="px-6 py-3 text-right font-mono text-sm font-semibold text-slate-900">
+                      {formatNumber(divisionFuelUsage.reduce((total, item) => total + item.vehicles, 0))}
+                    </th>
+                    <th className="px-6 py-3 text-right font-mono text-sm font-semibold text-slate-900">
+                      {formatFuelNumber(divisionFuelUsage.reduce((total, item) => total + item.liters, 0))}
+                    </th>
+                    <th className="px-6 py-3 text-right font-mono text-sm font-semibold text-slate-900">
+                      {formatFuelAmount(divisionFuelUsage.reduce((total, item) => total + item.amount, 0))}
+                    </th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </section>
