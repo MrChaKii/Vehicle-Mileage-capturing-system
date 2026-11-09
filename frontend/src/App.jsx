@@ -8,7 +8,6 @@ import EmployeeManagement from './components/EmployeeManagement';
 import FuelUsageDashboard from './components/FuelUsageDashboard';
 import LoginPage from './components/LoginPage';
 import MeterCapture from './components/MeterCapture';
-import PoolVehicleMeter from './components/PoolVehicleMeter';
 import ReadingHistory from './components/ReadingHistory';
 import ReadingsAdmin from './components/ReadingsAdmin';
 import VehicleManagement from './components/VehicleManagement';
@@ -190,7 +189,7 @@ function App() {
   const [poolVehicleReason, setPoolVehicleReason] = useState('');
   const [driverSelectionConfirmed, setDriverSelectionConfirmed] = useState(false);
   const [driverOptionsError, setDriverOptionsError] = useState(null);
-  const [poolMeterRefreshKey, setPoolMeterRefreshKey] = useState(0);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const hasAutoFilledHire = useRef(false);
 
   useEffect(() => {
@@ -653,21 +652,18 @@ function App() {
                       divisionId={selectedDivision}
                       divisionName={selectedDivisionName}
                       reason={poolVehicleReason.trim()}
-                      onSaved={() => setPoolMeterRefreshKey(key => key + 1)}
+                      onSaved={() => setHistoryRefreshKey(key => key + 1)}
                     />
                   </div>
 
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900 mb-4">History &amp; Stats</h2>
-                    {isPoolVehicleSelected && (
-                      <PoolVehicleMeter
-                        key={`pool-meter-${selectedDriverVehicle}-${driverDisplayName}`}
-                        vehicleId={selectedDriverVehicle}
-                        driverName={driverDisplayName}
-                        refreshKey={poolMeterRefreshKey}
-                      />
-                    )}
-                    <ReadingHistory key={`history-driver-${selectedDriverVehicle}`} vehicleId={selectedDriverVehicle} />
+                    <ReadingHistory
+                      key={`history-driver-${selectedDriverVehicle}`}
+                      vehicleId={selectedDriverVehicle}
+                      showTrips
+                      refreshKey={historyRefreshKey}
+                    />
                   </div>
                 </div>
               </div>

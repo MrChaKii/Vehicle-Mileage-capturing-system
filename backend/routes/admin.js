@@ -413,6 +413,20 @@ const getColomboDateKey = (value) => {
   return `${getPart('year')}-${getPart('month')}-${getPart('day')}`;
 };
 
+// All YYYY-MM-DD keys from startKey to endKey, inclusive to calculate number of days per month for pool vehicle in Analytics.
+const getDateKeysBetween = (startKey, endKey) => {
+  const keys = [];
+  const cursor = new Date(`${startKey}T00:00:00Z`);
+  const end = new Date(`${endKey}T00:00:00Z`);
+
+  while (cursor <= end) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return keys;
+};
+
 const getLatestRecordingDaySummary = (readings) => {
   const lastReadingByVehicle = new Map();
   const distanceByDate = new Map();
@@ -470,7 +484,7 @@ router.get('/analytics', async (req, res) => {
     const [readings, vehicles, users, companyDriverCount] = await Promise.all([
       Reading.find()
         .sort({ vehicleId: 1, readingDate: 1 })
-        .select('vehicleId extractedMileage ocrConfidence readingDate isCorrected submittedBy driverName'),
+        .select('vehicleId extractedMileage ocrConfidence readingDate isCorrected submittedBy driverName meterType'),
       Vehicle.find().sort({ vehicleNumber: 1 }).select('-__v'),
       User.find().select('name employeeId username role isActive'),
       CompanyDriver.countDocuments()
@@ -490,6 +504,7 @@ router.get('/analytics', async (req, res) => {
 
     const operatorMap = new Map();
     const lastReadingByVehicle = new Map();
+    const openTripByVehicle = new Map();
     let totalDistance = 0;
     let monthDistance = 0;
     let correctionCount = 0;
@@ -543,6 +558,41 @@ router.get('/analytics', async (req, res) => {
         operatorStats.vehicles.push(vehicleNumber);
       }
 
+      const isInSelectedMonth = readingDate >= selectedMonthStart && readingDate < nextMonthStart;
+
+      // Pool vehicles: monthly mileage is the sum of (IN meter - OUT meter) for every trip, credited to the month in which the trip's IN reading was recorded.
+      const isPoolVehicle = vehicleStats.ownership === 'pool';
+      if (isPoolVehicle) {
+        if (reading.meterType === 'out') {
+          openTripByVehicle.set(vehicleNumber, reading);
+        } else if (reading.meterType === 'in' && openTripByVehicle.has(vehicleNumber)) {
+          const outReading = openTripByVehicle.get(vehicleNumber);
+          const tripDistance = reading.extractedMileage - outReading.extractedMileage;
+          openTripByVehicle.delete(vehicleNumber);
+
+          if (tripDistance >= 0 && isInSelectedMonth) {
+            monthDistance += tripDistance;
+            vehicleStats.monthDistance += tripDistance;
+          }
+
+          // Days used: every calendar date from OUT to IN (inclusive) that falls in the selected month. 
+          // A same-day trip counts only if the vehicle actually moved.
+          // If many trips fall on the same day, that day is counted only once.
+          const outDateKey = getColomboDateKey(new Date(outReading.readingDate));
+          const inDateKey = getColomboDateKey(readingDate);
+
+          if (outDateKey === inDateKey) {
+            if (tripDistance !== 0 && inDateKey.startsWith(selectedMonth)) {
+              vehicleStats.monthUsageDates.add(inDateKey);
+            }
+          } else {
+            getDateKeysBetween(outDateKey, inDateKey)
+              .filter(dateKey => dateKey.startsWith(selectedMonth))
+              .forEach(dateKey => vehicleStats.monthUsageDates.add(dateKey));
+          }
+        }
+      }
+
       const previousReading = lastReadingByVehicle.get(vehicleNumber);
       if (previousReading) {
         const distance = reading.extractedMileage - previousReading.extractedMileage;
@@ -554,11 +604,13 @@ router.get('/analytics', async (req, res) => {
           vehicleStats.totalDistance += distance;
           operatorStats.totalDistance += distance;
 
-          if (readingDate >= selectedMonthStart && readingDate < nextMonthStart) {
-            monthDistance += distance;
-            vehicleStats.monthDistance += distance;
+          if (isInSelectedMonth) {
+            if (!isPoolVehicle) {
+              monthDistance += distance;
+              vehicleStats.monthDistance += distance;
+            }
 
-            if (distance > 0) {
+            if (distance > 0 && !isPoolVehicle) {
               vehicleStats.monthUsageDates.add(getColomboDateKey(readingDate));
             }
           }
