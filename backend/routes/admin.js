@@ -18,7 +18,6 @@ router.get('/summary', async (req, res) => {
       totalUsers,
       activeUsers,
       correctedReadings,
-      confidenceAgg,
       recentReadings
     ] = await Promise.all([
       Reading.countDocuments(),
@@ -27,9 +26,6 @@ router.get('/summary', async (req, res) => {
       User.countDocuments(),
       User.countDocuments({ isActive: true }),
       Reading.countDocuments({ isCorrected: true }),
-      Reading.aggregate([
-        { $group: { _id: null, averageConfidence: { $avg: '$ocrConfidence' } } }
-      ]),
       Reading.find()
         .sort({ readingDate: -1 })
         .limit(10)
@@ -42,8 +38,7 @@ router.get('/summary', async (req, res) => {
         vehicles: totalVehicles,
         users: totalUsers,
         activeUsers,
-        correctedReadings,
-        averageConfidence: confidenceAgg[0]?.averageConfidence || 0
+        correctedReadings
       },
       vehicles: vehicleNumbers.sort(),
       recentReadings
@@ -91,9 +86,7 @@ const createVehicleAnalyticsRow = (vehicle) => ({
   monthUsageDates: new Set(),
   lastMileage: null,
   lastReadingDate: null,
-  correctionCount: 0,
-  confidenceTotal: 0,
-  averageConfidence: 0
+  correctionCount: 0
 });
 
 const getOperatorKey = (reading) => {
@@ -199,7 +192,6 @@ const createVehicleAssignmentSessions = (readings, userMap) => {
         if (!firstReading || entry.readingDate < firstReading.readingDate) {
           currentSession.firstReadings.set(day, {
             mileage: entry.reading.extractedMileage,
-            confidence: entry.reading.ocrConfidence,
             readingDate: entry.readingDate
           });
         }
@@ -238,7 +230,6 @@ const createSessionDailyUsage = (firstReadings) => {
       nextDate: nextDay,
       startMileage: start.mileage,
       endMileage: end.mileage,
-      confidence: start.confidence,
       distance: Math.round(distance)
     }];
   });
@@ -470,7 +461,7 @@ router.get('/analytics', async (req, res) => {
     const [readings, vehicles, users, companyDriverCount] = await Promise.all([
       Reading.find()
         .sort({ vehicleId: 1, readingDate: 1 })
-        .select('vehicleId extractedMileage ocrConfidence readingDate isCorrected submittedBy driverName'),
+        .select('vehicleId extractedMileage readingDate isCorrected submittedBy driverName'),
       Vehicle.find().sort({ vehicleNumber: 1 }).select('-__v'),
       User.find().select('name employeeId username role isActive'),
       CompanyDriver.countDocuments()
@@ -493,8 +484,6 @@ router.get('/analytics', async (req, res) => {
     let totalDistance = 0;
     let monthDistance = 0;
     let correctionCount = 0;
-    let confidenceTotal = 0;
-    let confidenceCount = 0;
     let suspiciousReadings = 0;
 
     readings.forEach(reading => {
@@ -523,12 +512,6 @@ router.get('/analytics', async (req, res) => {
       if (reading.isCorrected) {
         correctionCount += 1;
         vehicleStats.correctionCount += 1;
-      }
-
-      if (typeof reading.ocrConfidence === 'number') {
-        confidenceTotal += reading.ocrConfidence;
-        confidenceCount += 1;
-        vehicleStats.confidenceTotal += reading.ocrConfidence;
       }
 
       const operatorKey = getOperatorKey(reading);
@@ -573,8 +556,7 @@ router.get('/analytics', async (req, res) => {
         ...vehicle,
         totalDistance: Math.round(vehicle.totalDistance),
         monthDistance: Math.round(vehicle.monthDistance),
-        monthDaysUsed: monthUsageDates.size,
-        averageConfidence: vehicle.readingCount ? vehicle.confidenceTotal / vehicle.readingCount : 0
+        monthDaysUsed: monthUsageDates.size
       }))
       .sort((a, b) => b.totalDistance - a.totalDistance || a.vehicleNumber.localeCompare(b.vehicleNumber));
 
@@ -619,7 +601,6 @@ router.get('/analytics', async (req, res) => {
         rangeDistance: Math.round(rangeDistance),
         latestDailyKilometers: latestRecordingDay.distance,
         latestUsageDate: latestRecordingDay.date,
-        averageConfidence: confidenceCount ? confidenceTotal / confidenceCount : 0,
         correctionRate: readings.length ? correctionCount / readings.length : 0,
         unassignedVehicles,
         suspiciousReadings
