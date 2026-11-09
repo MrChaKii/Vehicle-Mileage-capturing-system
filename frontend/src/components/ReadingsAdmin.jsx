@@ -34,7 +34,7 @@ const CorrectedBadge = ({ value }) =>
     </span>
   ) : (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
-      Auto
+      Manual
     </span>
   );
 
@@ -111,6 +111,10 @@ const ReadingsAdmin = () => {
   const [editMileage, setEditMileage] = useState('');
   const [deletingReading, setDeletingReading] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [photoReading, setPhotoReading] = useState(null);
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [photoLoadingId, setPhotoLoadingId] = useState('');
+  const [photoError, setPhotoError] = useState('');
   const [irregularReadings, setIrregularReadings] = useState([]);
   const [irregularLoading, setIrregularLoading] = useState(true);
   const [irregularError, setIrregularError] = useState('');
@@ -125,6 +129,28 @@ const ReadingsAdmin = () => {
   const [customEndDate, setCustomEndDate] = useState('');
 
   const debounceRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (photoUrl) {
+        URL.revokeObjectURL(photoUrl);
+      }
+    };
+  }, [photoUrl]);
+
+  const openPhoto = async (reading) => {
+    setPhotoLoadingId(reading._id);
+    setPhotoError('');
+    try {
+      const response = await api.get(`/readings/${reading._id}/image`, { responseType: 'blob' });
+      setPhotoReading(reading);
+      setPhotoUrl(URL.createObjectURL(response.data));
+    } catch (err) {
+      setPhotoError(err.response?.data?.error || 'Failed to load meter photo from Google Drive.');
+    } finally {
+      setPhotoLoadingId('');
+    }
+  };
 
   const buildParams = useCallback(
     (overridePage) => {
@@ -671,6 +697,9 @@ const ReadingsAdmin = () => {
                     Mileage
                   </th>
                   <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
+                    Photo
+                  </th>
+                  <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
                     Status
                   </th>
                   <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
@@ -733,6 +762,20 @@ const ReadingsAdmin = () => {
                       )}
                     </td>
 
+                    {/* Photo */}
+                    <td className="px-4 py-3.5 text-center">
+                      {reading.hasMeterImage && (
+                        <button
+                          type="button"
+                          onClick={() => openPhoto(reading)}
+                          disabled={photoLoadingId === reading._id}
+                          className="text-sm font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                        >
+                          {photoLoadingId === reading._id ? 'Loading...' : 'View photo'}
+                        </button>
+                      )}
+                    </td>
+
                     {/* Status */}
                     <td className="px-4 py-3.5 text-center">
                       <CorrectedBadge value={reading.isCorrected} />
@@ -783,6 +826,7 @@ const ReadingsAdmin = () => {
                   </button>
                 )
               )}
+
             </div>
 
             <button
@@ -794,7 +838,49 @@ const ReadingsAdmin = () => {
             </button>
           </div>
         )}
+
+        {photoError && (
+          <div className="mx-6 mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+            {photoError}
+          </div>
+        )}
       </div>
+
+      {photoUrl && photoReading && (
+        <div
+          className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Meter photo"
+          onClick={() => {
+            setPhotoUrl('');
+            setPhotoReading(null);
+          }}
+        >
+          <div className="relative max-w-4xl w-full" onClick={event => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between text-white">
+              <p className="text-sm font-medium">
+                {photoReading.vehicleId} · {photoReading.extractedMileage?.toLocaleString()} km
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setPhotoUrl('');
+                  setPhotoReading(null);
+                }}
+                className="rounded px-3 py-1 text-sm font-medium hover:bg-white/10"
+              >
+                Close
+              </button>
+            </div>
+            <img
+              src={photoUrl}
+              alt={`${photoReading.vehicleId} odometer reading`}
+              className="max-h-[80vh] w-full rounded-lg bg-black object-contain"
+            />
+          </div>
+        </div>
+      )}
 
       {/* ── Irregular Pool Meter Readings ── */}
       <div className="card overflow-hidden p-0">

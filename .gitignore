@@ -24,6 +24,3 @@ dist-ssr
 *.sw?
 
 package-lock.json
-
-/ocr-service/__pycache__/
-/ocr-service/.venv/

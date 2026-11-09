@@ -594,7 +594,7 @@ const AnalyticsDashboard = () => {
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Admin</p>
           <h2 className="text-2xl font-bold text-slate-950 mt-0.5">Fleet Analytics</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Executive mileage insights across vehicles, drivers, usage, and OCR quality.
+            Executive mileage insights across vehicles, drivers, and usage.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3">
