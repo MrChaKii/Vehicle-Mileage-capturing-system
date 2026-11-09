@@ -370,7 +370,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-900 leading-tight">Fleet Mileage</h1>
-              <p className="text-xs text-slate-500">{isAdmin ? 'Admin control panel' : 'OCR-powered odometer tracking'}</p>
+              <p className="text-xs text-slate-500">{isAdmin ? 'Admin control panel' : 'Camera-based odometer tracking'}</p>
             </div>
           </div>
 
@@ -741,7 +741,7 @@ function App() {
 
       <footer className="border-t border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 text-center text-sm text-slate-400">
-          Images are processed in-memory and never stored. Powered by EasyOCR.
+          Meter photos are captured with your camera and saved with each reading.
         </div>
       </footer>
     </div>

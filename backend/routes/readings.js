@@ -1,37 +1,39 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const axios = require('axios');
-const FormData = require('form-data');
 const Reading = require('../models/Reading');
 const Vehicle = require('../models/Vehicle');
 const CompanyDriver = require('../models/CompanyDriver');
 const Division = require('../models/Division');
 const User = require('../models/User');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
+const { uploadMeterPhoto, downloadMeterPhoto, deleteMeterPhoto } = require('../utils/googleDrive');
 
-// CRITICAL: Store file in memory only, never on disk
-const upload = multer({ storage: multer.memoryStorage() });
+const ADMIN_ROLES = ['admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'];
+
+const MAX_METER_IMAGE_SIZE = 5 * 1024 * 1024;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_METER_IMAGE_SIZE, files: 1 },
+  fileFilter: (req, file, callback) => {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      return callback(new Error('Meter photo must be a JPEG, PNG, or WebP image'));
+    }
+    callback(null, true);
+  }
+});
 
 const MAX_POOL_IN_TO_OUT_GAP_KM = 1;
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const getOcrExtractUrl = () => {
-  const configuredUrl = (process.env.OCR_SERVICE_URL || 'http://localhost:8000').trim();
-
-  let baseUrl;
-  try {
-    baseUrl = new URL(configuredUrl);
-  } catch {
-    throw new Error('OCR_SERVICE_URL must be an absolute http:// or https:// URL.');
-  }
-
-  if (!['http:', 'https:'].includes(baseUrl.protocol)) {
-    throw new Error('OCR_SERVICE_URL must use http:// or https://.');
-  }
-
-  return new URL('extract', `${baseUrl.href.replace(/\/+$/, '')}/`).href;
+const uploadMeterImage = (req, res, next) => {
+  upload.single('meterImage')(req, res, error => {
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+    next();
+  });
 };
 
 router.use(authenticate);
@@ -58,63 +60,28 @@ router.get('/options', async (req, res) => {
   }
 });
 
-// POST /api/readings/extract — Analyze image, return data, DON'T save yet
-router.post('/extract', upload.single('meterImage'), async (req, res) => {
+// POST /api/readings — Save a manually entered reading with its camera photo
+router.post('/', uploadMeterImage, async (req, res) => {
   try {
+    const { vehicleId, mileage, location, driverName, division, divisionName, reason } = req.body;
+
     if (!req.file) {
-      return res.status(400).json({ error: 'No image provided' });
+      return res.status(400).json({ error: 'A camera photo is required' });
     }
 
-    // Forward image buffer to Python EasyOCR service
-    const form = new FormData();
-    form.append('file', req.file.buffer, {
-      filename: req.file.originalname,
-      contentType: req.file.mimetype
-    });
-
-    const ocrResponse = await axios.post(getOcrExtractUrl(), form, {
-      headers: form.getHeaders(),
-      timeout: 30000  // OCR can be slow on first run
-    });
-
-    const ocrData = ocrResponse.data;
-
-    if (!ocrData.success || !ocrData.best_guess) {
-      return res.status(422).json({
-        error: 'Could not detect odometer reading',
-        rawText: ocrData.raw_text,
-        suggestion: 'Ensure the odometer is centered, well-lit, and glare-free'
-      });
+    const mileageNumber = Number(mileage);
+    if (!vehicleId || mileage === undefined || String(mileage).trim() === ''
+      || !Number.isSafeInteger(mileageNumber) || mileageNumber < 0) {
+      return res.status(400).json({ error: 'A valid vehicle ID and mileage are required' });
     }
 
-    // Return extracted data for user verification — NOT saved yet
-    res.json({
-      success: true,
-      extracted: {
-        mileage: ocrData.best_guess.value,
-        confidence: ocrData.best_guess.confidence,
-        rawText: ocrData.raw_text,
-        allCandidates: ocrData.candidates
+    let parsedLocation = null;
+    if (location) {
+      try {
+        parsedLocation = JSON.parse(location);
+      } catch {
+        return res.status(400).json({ error: 'Invalid location data' });
       }
-    });
-
-  } catch (error) {
-    console.error('OCR forwarding error:', error.message);
-    const isConfigurationError = error.message.startsWith('OCR_SERVICE_URL');
-    res.status(isConfigurationError ? 500 : 502).json({
-      error: 'OCR service unavailable',
-      detail: error.message 
-    });
-  }
-});
-
-// POST /api/readings — Save after user confirms/corrects
-router.post('/', async (req, res) => {
-  try {
-    const { vehicleId, mileage, rawText, confidence, isCorrected, originalMileage, location, driverName, division, divisionName, reason } = req.body;
-
-    if (!vehicleId || mileage === undefined) {
-      return res.status(400).json({ error: 'vehicleId and mileage are required' });
     }
 
     // Optional: Validate against last reading to prevent rollback
@@ -139,7 +106,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    if (lastReading && mileage < lastReading.extractedMileage) {
+    if (lastReading && mileageNumber < lastReading.extractedMileage) {
       return res.status(400).json({
         error: 'Mileage is less than last recorded reading',
         lastReading: lastReading.extractedMileage,
@@ -151,16 +118,41 @@ router.post('/', async (req, res) => {
     // A larger gap is informational only; the reading is still saved.
     const exceedsPoolGap = meterType === 'out'
       && lastReading?.meterType === 'in'
-      && mileage - lastReading.extractedMileage > MAX_POOL_IN_TO_OUT_GAP_KM;
+      && mileageNumber - lastReading.extractedMileage > MAX_POOL_IN_TO_OUT_GAP_KM;
+
+    let driveFileId;
+    try {
+      const fileExtension = {
+        'image/jpeg': 'jpg',
+        'image/png': 'png',
+        'image/webp': 'webp'
+      }[req.file.mimetype];
+      driveFileId = await uploadMeterPhoto({
+        buffer: req.file.buffer,
+        contentType: req.file.mimetype,
+        fileName: `meter-${vehicleId.toUpperCase().trim()}-${Date.now()}.${fileExtension}`
+      });
+    } catch (error) {
+      console.error('Google Drive meter photo upload error:', {
+        message: error.message,
+        code: error.code,
+        status: error.response?.status
+      });
+      return res.status(502).json({
+        error: error.message.startsWith('Google Drive configuration is missing:')
+          ? error.message
+          : 'Could not upload the meter photo to Google Drive. Check backend logs and Drive permissions.'
+      });
+    }
 
     const reading = new Reading({
       vehicleId: vehicleId.toUpperCase().trim(),
-      extractedMileage: mileage,
-      rawOcrText: rawText || '',
-      ocrConfidence: confidence || 0,
-      isCorrected: isCorrected || false,
-      originalMileage: originalMileage || null,
-      location,
+      extractedMileage: mileageNumber,
+      meterImageDriveId: driveFileId,
+      meterImageContentType: req.file.mimetype,
+      hasMeterImage: true,
+      isCorrected: false,
+      location: parsedLocation,
       submittedBy: req.user._id.toString(),
       driverName: driverName || '',
       division: division || null,
@@ -169,7 +161,16 @@ router.post('/', async (req, res) => {
       meterType
     });
 
-    await reading.save();
+    try {
+      await reading.save();
+    } catch (error) {
+      try {
+        await deleteMeterPhoto(driveFileId);
+      } catch (cleanupError) {
+        console.error('Google Drive orphaned meter photo cleanup error:', cleanupError);
+      }
+      throw error;
+    }
 
     res.status(201).json({
       success: true,
@@ -178,7 +179,8 @@ router.post('/', async (req, res) => {
         vehicleId: reading.vehicleId,
         mileage: reading.extractedMileage,
         date: reading.readingDate,
-        meterType: reading.meterType
+        meterType: reading.meterType,
+        hasMeterImage: true
       },
       ...(exceedsPoolGap && {
         warning: `Your OUT meter is more than ${MAX_POOL_IN_TO_OUT_GAP_KM} km larger than the last IN meter reading for this vehicle.`
@@ -192,7 +194,7 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/readings — All readings (admin, filterable + paginated)
-router.get('/', async (req, res) => {
+router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
   try {
     const { vehicleId, driverName, userKey, startDate, endDate, ownership, month, page = 1 } = req.query;
     const PAGE_SIZE = 50;
@@ -299,7 +301,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/readings/irregular-pool — Pool OUT readings too far above the previous IN (must be BEFORE /:vehicleId)
-router.get('/irregular-pool', authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'), async (req, res) => {
+router.get('/irregular-pool', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
   try {
     const vehicleIds = await Reading.distinct('vehicleId', { meterType: 'in' });
     const readings = await Reading.find({ vehicleId: { $in: vehicleIds } })
@@ -370,7 +372,7 @@ router.get('/stats/:vehicleId', async (req, res) => {
 });
 
 // PUT /api/readings/:id — Admin can correct only the saved mileage value
-router.put('/:id', authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'), async (req, res) => {
+router.put('/:id', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
   try {
     const mileage = Number(req.body.mileage);
 
@@ -402,18 +404,55 @@ router.put('/:id', authenticate, authorizeRoles('admin', 'superadmin', 'super_ad
 });
 
 // DELETE /api/readings/:id — Admin can remove an incorrect reading
-router.delete('/:id', authenticate, authorizeRoles('admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'), async (req, res) => {
+router.delete('/:id', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
   try {
-    const reading = await Reading.findByIdAndDelete(req.params.id);
+    const reading = await Reading.findById(req.params.id).select('+meterImageDriveId');
 
     if (!reading) {
       return res.status(404).json({ error: 'Reading not found' });
+    }
+
+    await Reading.findByIdAndDelete(req.params.id);
+
+    if (reading.meterImageDriveId) {
+      try {
+        await deleteMeterPhoto(reading.meterImageDriveId);
+      } catch (error) {
+        console.error('Google Drive meter photo deletion error:', error);
+        return res.status(502).json({ error: 'Reading deleted, but its Google Drive photo could not be deleted.' });
+      }
     }
 
     res.json({ success: true, id: req.params.id });
   } catch (error) {
     console.error('Admin reading delete error:', error);
     res.status(500).json({ error: 'Failed to delete reading' });
+  }
+});
+
+// GET /api/readings/:id/image — Saved odometer photo
+router.get('/:id/image', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
+  try {
+    const reading = await Reading.findById(req.params.id)
+      .select('+meterImageDriveId +meterImageContentType');
+    if (!reading?.meterImageDriveId) {
+      return res.status(404).json({ error: 'Meter photo not found' });
+    }
+
+    const image = await downloadMeterPhoto(reading.meterImageDriveId);
+    res.set('Cache-Control', 'private, no-store');
+    res.type(reading.meterImageContentType || 'application/octet-stream').send(image);
+  } catch (error) {
+    console.error('Meter photo load error:', {
+      message: error.message,
+      code: error.code,
+      status: error.response?.status
+    });
+    res.status(502).json({
+      error: error.message.startsWith('Google Drive configuration is missing:')
+        ? error.message
+        : 'Failed to load meter photo from Google Drive. Check backend logs and Drive permissions.'
+    });
   }
 });
 

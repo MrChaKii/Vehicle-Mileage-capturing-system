@@ -113,7 +113,6 @@ const ReadingHistory = ({ vehicleId }) => {
                 <tr className="border-b border-slate-200">
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-3">Date</th>
                   <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider pb-3">Mileage</th>
-                  <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider pb-3">OCR</th>
                   <th className="text-center text-xs font-semibold text-slate-500 uppercase tracking-wider pb-3">Status</th>
                 </tr>
               </thead>
@@ -135,28 +134,19 @@ const ReadingHistory = ({ vehicleId }) => {
                       <span className="text-xs text-slate-400 ml-1">km</span>
                     </td>
                     <td className="py-3 text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        r.ocrConfidence > 0.8 ? 'bg-emerald-100 text-emerald-800' :
-                        r.ocrConfidence > 0.5 ? 'bg-amber-100 text-amber-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {(r.ocrConfidence * 100).toFixed(0)}%
-                      </span>
-                    </td>
-                    <td className="py-3 text-center">
                       {r.isCorrected ? (
                         <span className="inline-flex items-center gap-1 text-amber-600 text-xs font-medium">
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
-                          Edited
+                          Corrected
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-medium">
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                           </svg>
-                          Auto
+                          Manual
                         </span>
                       )}
                     </td>
@@ -167,6 +157,7 @@ const ReadingHistory = ({ vehicleId }) => {
           </div>
         )}
       </div>
+
     </div>
   );
 };
