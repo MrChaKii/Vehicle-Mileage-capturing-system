@@ -9,6 +9,33 @@ const User = require('../models/User');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 const { uploadMeterPhoto, downloadMeterPhoto, deleteMeterPhoto } = require('../utils/googleDrive');
 
+// Calendar date (YYYY-MM-DD) in Sri Lankan time.
+const getColomboDateKey = (value) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Colombo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(value);
+  const getPart = (type) => parts.find(part => part.type === type)?.value;
+
+  return `${getPart('year')}-${getPart('month')}-${getPart('day')}`;
+};
+
+// All YYYY-MM-DD keys from start to end, inclusive, to count the days a pool vehicle was used for the daily avg.
+const getDateKeysBetween = (startKey, endKey) => {
+  const keys = [];
+  const cursor = new Date(`${startKey}T00:00:00Z`);
+  const end = new Date(`${endKey}T00:00:00Z`);
+
+  while (cursor <= end) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return keys;
+};
+
 const ADMIN_ROLES = ['admin', 'superadmin', 'super_admin', 'super admin', 'super-admin'];
 
 const MAX_METER_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -345,9 +372,12 @@ router.get('/stats/:vehicleId', async (req, res) => {
   try {
     const vehicleId = req.params.vehicleId.toUpperCase();
 
-    const readings = await Reading.find({ vehicleId })
-      .sort({ readingDate: 1 })
-      .select('extractedMileage readingDate');
+    const [readings, vehicle] = await Promise.all([
+      Reading.find({ vehicleId })
+        .sort({ readingDate: 1 })
+        .select('extractedMileage readingDate meterType'),
+      Vehicle.findOne({ vehicleNumber: vehicleId }).select('ownership')
+    ]);
 
     if (readings.length === 0) {
       return res.json({ totalReadings: 0, totalDistance: 0, averageDaily: 0 });
@@ -356,14 +386,47 @@ router.get('/stats/:vehicleId', async (req, res) => {
     const totalReadings = readings.length;
     const first = readings[0];
     const last = readings[readings.length - 1];
-    const totalDistance = last.extractedMileage - first.extractedMileage;
+    let totalDistance = last.extractedMileage - first.extractedMileage;
+    let averageDaily;
 
-    // Days between first and last reading (minimum 1 to avoid division by zero)
-    const daysDiff = Math.max(
-      1,
-      Math.round((new Date(last.readingDate) - new Date(first.readingDate)) / (1000 * 60 * 60 * 24))
-    );
-    const averageDaily = totalReadings > 1 ? Math.round(totalDistance / daysDiff) : 0;
+    if (vehicle?.ownership === 'pool') {
+      // Pool vehicles, per completed trip:
+      // - total km adds up (IN meter - OUT meter)
+      // - days used collects every calendar date from OUT to IN (inclusive); a same-day
+      //   trip counts only if the vehicle moved. Each date is counted once.
+      totalDistance = 0;
+      const usedDates = new Set();
+      let openOut = null;
+
+      readings.forEach(reading => {
+        if (reading.meterType === 'out') {
+          openOut = reading;
+        } else if (reading.meterType === 'in' && openOut) {
+          const tripDistance = reading.extractedMileage - openOut.extractedMileage;
+          totalDistance += Math.max(0, tripDistance);
+
+          const outDateKey = getColomboDateKey(new Date(openOut.readingDate));
+          const inDateKey = getColomboDateKey(new Date(reading.readingDate));
+
+          if (outDateKey !== inDateKey) {
+            getDateKeysBetween(outDateKey, inDateKey).forEach(dateKey => usedDates.add(dateKey));
+          } else if (tripDistance !== 0) {
+            usedDates.add(inDateKey);
+          }
+
+          openOut = null;
+        }
+      });
+
+      averageDaily = usedDates.size > 0 ? Math.round(totalDistance / usedDates.size) : 0;
+    } else {
+      // Days between first and last reading (minimum 1 to avoid division by zero)
+      const daysDiff = Math.max(
+        1,
+        Math.round((new Date(last.readingDate) - new Date(first.readingDate)) / (1000 * 60 * 60 * 24))
+      );
+      averageDaily = totalReadings > 1 ? Math.round(totalDistance / daysDiff) : 0;
+    }
 
     res.json({ totalReadings, totalDistance: Math.max(0, totalDistance), averageDaily });
   } catch (error) {
