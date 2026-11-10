@@ -11,6 +11,7 @@ import MeterCapture from './components/MeterCapture';
 import ReadingHistory from './components/ReadingHistory';
 import ReadingsAdmin from './components/ReadingsAdmin';
 import VehicleManagement from './components/VehicleManagement';
+import PoolVehicleUsage from './components/PoolVehicleUsage';
 
 const adminNavItems = [
   {
@@ -72,6 +73,14 @@ const adminNavItems = [
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
       </svg>
+    )
+  },
+  {
+    id: 'poolVehicles',
+    label: 'Pool Vehicles',
+    path: '/admin/pool-vehicles',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><title>car</title><g fill="none" stroke="currentColor" strokeLinecap="round" stroke-linejoin="round" stroke-width="2"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></g></svg>
     )
   },
   {
@@ -443,6 +452,8 @@ function App() {
                   <AnalyticsDashboard />
                 ) : adminPage === 'readings' ? (
                   <ReadingsAdmin />
+                 ) : adminPage === 'poolVehicles' ? (
+                  <PoolVehicleUsage />
                 ) : adminPage === 'fuelUsage' ? (
                   <FuelUsageDashboard />
                 ) : (
@@ -452,7 +463,7 @@ function App() {
             </section>
           </div>
         ) : isDriver ? (
-          // ── Driver login workspace ─────────────────────────────────────
+          // ── Driver login workspace 
           <div className="space-y-6">
             {/* Step 1: Vehicle + Driver Name selection */}
             {!driverSelectionConfirmed ? (
