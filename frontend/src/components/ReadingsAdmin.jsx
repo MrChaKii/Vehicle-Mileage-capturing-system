@@ -335,8 +335,7 @@ const ReadingsAdmin = () => {
       {/* ── Header ── */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Admin</p>
-          <h2 className="text-2xl font-bold text-slate-900 mt-0.5">Readings</h2>
+          <h2 className="text-2xl font-bold text-slate-900">Readings</h2>
           <p className="text-sm text-slate-500 mt-1">
             Browse and filter all odometer readings across the fleet.
           </p>
@@ -350,14 +349,6 @@ const ReadingsAdmin = () => {
             className="btn-secondary"
             title="Refresh"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582M20 20v-5h-.581M5.635 15A8 8 0 1118.364 8.636"
-              />
-            </svg>
             <span className="ml-1.5">Refresh</span>
           </button>
           <button
