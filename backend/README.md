@@ -1,5 +1,13 @@
 # Backend configuration
 
+## Local environment
+
+Copy `.env.example` to `.env` in this directory and fill in the values for your
+machine. `.env` files are ignored by Git; commit only the blank `.env.example`
+template. The backend reads `AUTH_TOKEN_SECRET` for signing tokens. Keep all
+backend secrets on the server and configure production values using your hosting
+provider's environment-variable settings.
+
 ## Google Drive meter photos
 
 Meter photos are uploaded to a private Google Drive folder. The database stores
