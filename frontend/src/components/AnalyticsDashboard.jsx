@@ -62,6 +62,45 @@ const getDefaultDateRange = () => {
   };
 };
 
+const getMonthDateRange = (month) => {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const start = new Date(year, monthNumber - 1, 1);
+  const end = new Date(year, monthNumber, 0);
+  const today = new Date();
+
+  if (end > today) {
+    end.setTime(today.getTime());
+  }
+
+  return {
+    startDate: getDateInputValue(start),
+    endDate: getDateInputValue(end)
+  };
+};
+
+const getInclusiveDateCount = (startDate, endDate) => {
+  if (!startDate || !endDate) {
+    return 0;
+  }
+
+  const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+  const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+  const start = Date.UTC(startYear, startMonth - 1, startDay);
+  const end = Date.UTC(endYear, endMonth - 1, endDay);
+
+  return Math.floor((end - start) / 86400000) + 1;
+};
+
+const getMaximumRangeEndDate = (startDate) => {
+  if (!startDate) {
+    return undefined;
+  }
+
+  const [year, month, day] = startDate.split('-').map(Number);
+  const maximumDate = new Date(Date.UTC(year, month - 1, day + 59));
+  return maximumDate.toISOString().slice(0, 10);
+};
+
 const exportUserReport = (rows, startDate, endDate) => {
   const headers = ['User', 'Employee ID', 'Vehicle', 'First recording', 'Last recording', 'Start mileage (km)', 'End mileage (km)', 'Mileage gap (km)', 'Recordings'];
   const csvRows = rows.map(row => [
@@ -250,6 +289,97 @@ const DateRangeFilter = ({ filters, onChange, onSubmit, error, searching }) => (
   </div>
 );
 
+const SearchableDropdown = ({ label, value, options, placeholder, onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const dropdownRef = useRef(null);
+  const selectedOption = options.find(option => option.value === value);
+  const filteredOptions = options.filter(option => (
+    option.label.toLowerCase().includes(search.trim().toLowerCase())
+  ));
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const closeOnOutsideClick = (event) => {
+      if (!dropdownRef.current?.contains(event.target)) {
+        setIsOpen(false);
+        setSearch('');
+      }
+    };
+
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
+  }, [isOpen]);
+
+  const selectOption = (optionValue) => {
+    onChange(optionValue);
+    setIsOpen(false);
+    setSearch('');
+  };
+
+  return (
+    <div className="relative text-xs font-semibold text-slate-600" ref={dropdownRef}>
+      <span className="block">{label}</span>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen(open => !open)}
+        className="input mt-1 flex h-10 w-full items-center justify-between gap-2 text-left text-sm font-normal"
+      >
+        <span className={selectedOption ? 'truncate text-slate-900' : 'truncate text-slate-500'}>
+          {selectedOption?.label || placeholder}
+        </span>
+        <svg className="h-4 w-4 shrink-0 text-slate-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fillRule="evenodd" d="M5.22 7.22a.75.75 0 011.06 0L10 10.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 8.28a.75.75 0 010-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+          <div className="border-b border-slate-100 p-2">
+            <input
+              type="search"
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  setIsOpen(false);
+                  setSearch('');
+                }
+              }}
+              placeholder={`Search ${label.toLowerCase()}...`}
+              aria-label={`Search ${label.toLowerCase()}`}
+              autoFocus
+              className="input h-9 w-full text-sm font-normal"
+            />
+          </div>
+          <div role="listbox" aria-label={label} className="max-h-52 overflow-y-auto p-1">
+            {filteredOptions.length ? filteredOptions.map(option => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                key={option.value || 'all'}
+                onClick={() => selectOption(option.value)}
+                className={`w-full rounded-md px-3 py-2 text-left text-sm font-normal hover:bg-slate-100 ${
+                  option.value === value ? 'bg-brand-50 text-brand-700' : 'text-slate-700'
+                }`}
+              >
+                {option.label}
+              </button>
+            )) : (
+              <p className="px-3 py-2 text-sm font-normal text-slate-500">No matches found.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AnalyticsDashboard = () => {
   const [analytics, setAnalytics] = useState(null);
   const [fuelTypeMonth, setFuelTypeMonth] = useState(() => getCurrentMonth());
@@ -269,7 +399,13 @@ const AnalyticsDashboard = () => {
   const [reportRange, setReportRange] = useState(() => getDefaultDateRange());
   const [reportUsage, setReportUsage] = useState([]);
   const [reportError, setReportError] = useState('');
-  const [operatorFilters, setOperatorFilters] = useState(() => getDefaultDateRange());
+  const [operatorFilters, setOperatorFilters] = useState(() => ({
+    category: '',
+    vehicleNumber: '',
+    period: 'monthly',
+    month: getCurrentMonth(),
+    ...getDefaultDateRange()
+  }));
   const [operatorUsage, setOperatorUsage] = useState([]);
   const [operatorError, setOperatorError] = useState('');
   const [contributionFilters, setContributionFilters] = useState(() => getDefaultDateRange());
@@ -355,8 +491,8 @@ const AnalyticsDashboard = () => {
     fetchPoolVehicleUsage(poolMonth);
   };
 
-  const fetchRangeUsage = useCallback(async (range) => {
-    const res = await api.get('/admin/analytics', { params: range });
+  const fetchRangeUsage = useCallback(async (filters) => {
+    const res = await api.get('/admin/analytics', { params: filters });
     return res.data.rangeUsage || [];
   }, []);
 
@@ -404,6 +540,11 @@ const AnalyticsDashboard = () => {
       return;
     }
 
+    if (getInclusiveDateCount(filters.startDate, filters.endDate) > 60) {
+      setSectionError('Date range cannot exceed 60 days.');
+      return;
+    }
+
     setSectionError('');
     setSearchingSection(section);
     try {
@@ -419,11 +560,63 @@ const AnalyticsDashboard = () => {
     }
   };
 
+  const searchOperatorUsage = async (event) => {
+    event.preventDefault();
+
+    if (operatorFilters.period === 'monthly' && !operatorFilters.month) {
+      setOperatorError('Select a month.');
+      return;
+    }
+
+    const range = operatorFilters.period === 'custom'
+      ? { startDate: operatorFilters.startDate, endDate: operatorFilters.endDate }
+      : getMonthDateRange(operatorFilters.month);
+
+    if (!range.startDate || !range.endDate) {
+      setOperatorError(operatorFilters.period === 'custom'
+        ? 'Select both a start date and an end date.'
+        : 'Select a month.');
+      return;
+    }
+
+    if (range.startDate > range.endDate) {
+      setOperatorError('End date must be on or after start date.');
+      return;
+    }
+
+    if (getInclusiveDateCount(range.startDate, range.endDate) > 60) {
+      setOperatorError('Date range cannot exceed 60 days.');
+      return;
+    }
+
+    setOperatorError('');
+    setSearchingSection('operator');
+    try {
+      const rows = await fetchRangeUsage({
+        ...range,
+        category: operatorFilters.category,
+        vehicleNumber: operatorFilters.vehicleNumber
+      });
+      setOperatorUsage(rows);
+    } catch (err) {
+      setOperatorError(err.response?.data?.error || 'Failed to load analytics for this date range');
+    } finally {
+      setSearchingSection('');
+    }
+  };
+
   const kpis = analytics?.kpis || {};
   const currentVehicleMileage = useMemo(() => (
     [...(analytics?.vehicleUsage || [])]
       .sort((left, right) => left.vehicleNumber.localeCompare(right.vehicleNumber))
   ), [analytics]);
+  const operatorCategories = [...new Set(
+    (analytics?.vehicleUsage || []).map(vehicle => vehicle.ownership).filter(Boolean)
+  )].sort();
+  const operatorVehicleNumbers = (analytics?.vehicleUsage || [])
+    .filter(vehicle => !operatorFilters.category || vehicle.ownership === operatorFilters.category)
+    .map(vehicle => vehicle.vehicleNumber)
+    .sort((left, right) => left.localeCompare(right));
   const reportSummary = useMemo(() => summarizeUsage(reportUsage), [reportUsage]);
   const contributionSummary = useMemo(() => summarizeUsage(contributionUsage), [contributionUsage]);
   const reportDistance = reportUsage.reduce((total, row) => total + row.distance, 0);
@@ -787,13 +980,115 @@ const AnalyticsDashboard = () => {
             <p className="text-sm text-slate-500 mt-1">First-to-last odometer difference for each continuous operator and vehicle session.</p>
             <p className="text-xs font-semibold text-slate-500 mt-2">{operatorUsage.length} recording gaps</p>
           </div>
-          <DateRangeFilter
-            filters={operatorFilters}
-            onChange={setOperatorFilters}
-            onSubmit={event => searchRange(event, 'operator', operatorFilters, setOperatorUsage, setOperatorError)}
-            error={operatorError}
-            searching={searchingSection === 'operator'}
-          />
+          <form onSubmit={searchOperatorUsage} className="w-full xl:max-w-4xl rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <SearchableDropdown
+                label="Category"
+                value={operatorFilters.category}
+                placeholder="All categories"
+                options={[
+                  { value: '', label: 'All categories' },
+                  ...operatorCategories.map(category => ({
+                    value: category,
+                    label: category.charAt(0).toUpperCase() + category.slice(1)
+                  }))
+                ]}
+                onChange={category => setOperatorFilters(previous => ({
+                    ...previous,
+                    category,
+                    vehicleNumber: ''
+                  }))}
+              />
+              <SearchableDropdown
+                label="Select Vehicle No"
+                value={operatorFilters.vehicleNumber}
+                placeholder="All vehicles"
+                options={[
+                  { value: '', label: 'All vehicles' },
+                  ...operatorVehicleNumbers.map(vehicleNumber => ({
+                    value: vehicleNumber,
+                    label: vehicleNumber
+                  }))
+                ]}
+                onChange={vehicleNumber => setOperatorFilters(previous => ({
+                  ...previous,
+                  vehicleNumber
+                }))}
+              />
+              {operatorFilters.period === 'monthly' ? (
+                <label className="text-xs font-semibold text-slate-600">
+                  Monthly
+                  <input
+                    type="month"
+                    value={operatorFilters.month}
+                    max={getCurrentMonth()}
+                    onChange={event => setOperatorFilters(previous => ({
+                      ...previous,
+                      month: event.target.value
+                    }))}
+                    className="input mt-1 h-10 w-full"
+                  />
+                </label>
+              ) : (
+                <div className="sm:col-span-2 xl:col-span-1 grid grid-cols-2 gap-2">
+                  <label className="text-xs font-semibold text-slate-600">
+                    From date
+                    <input
+                      type="date"
+                      value={operatorFilters.startDate}
+                      max={operatorFilters.endDate || getDateInputValue(new Date())}
+                      onChange={event => setOperatorFilters(previous => ({
+                        ...previous,
+                        startDate: event.target.value
+                      }))}
+                      className="input mt-1 h-10 w-full"
+                      required
+                    />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-600">
+                    To date
+                    <input
+                      type="date"
+                      value={operatorFilters.endDate}
+                      min={operatorFilters.startDate || undefined}
+                      max={operatorFilters.startDate
+                        ? [getMaximumRangeEndDate(operatorFilters.startDate), getDateInputValue(new Date())].sort()[0]
+                        : getDateInputValue(new Date())}
+                      onChange={event => setOperatorFilters(previous => ({
+                        ...previous,
+                        endDate: event.target.value
+                      }))}
+                      className="input mt-1 h-10 w-full"
+                      required
+                    />
+                  </label>
+                </div>
+              )}
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOperatorFilters(previous => ({
+                    ...previous,
+                    period: previous.period === 'monthly' ? 'custom' : 'monthly'
+                  }))}
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100 whitespace-nowrap"
+                >
+                  {operatorFilters.period === 'monthly' ? 'Custom' : 'Monthly'}
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary h-10 px-4 text-sm whitespace-nowrap"
+                  disabled={searchingSection === 'operator'}
+                >
+                  {searchingSection === 'operator' ? 'Searching...' : 'Apply'}
+                </button>
+              </div>
+            </div>
+            {operatorFilters.period === 'custom' && (
+              <p className="mt-2 text-xs text-slate-500">Custom date range is limited to 60 days.</p>
+            )}
+            {operatorError && <p className="mt-2 text-xs font-medium text-red-600" role="alert">{operatorError}</p>}
+          </form>
         </div>
 
         {operatorUsage.length === 0 ? (
