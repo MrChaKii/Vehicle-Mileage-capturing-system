@@ -30,3 +30,19 @@ Keep the Drive folder private. The backend returns a clear upload error if the
 OAuth credentials are missing or the account cannot access the folder. Keep
 OAuth secrets in the backend environment only; do not expose them to the
 frontend or commit them to source control.
+
+## Monthly mileage reminder emails
+
+All users who own personal and company vehicles have to submit a mileage reading within the first two days of a month. If no reading has been submitted, the user gets a reminder email via Nodemailer. For this to work, SMTP needs to be configured.
+
+Configure SMTP in the backend environment (`backend/.env`):
+
+| Variable      | What it holds                                                                     | Example                                                                                 |
+| ------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `SMTP_HOST`   | The address of the mail server that sends the email.                              | `smtp.gmail.com` (if you're using Gmail or Google Workspace)                            |
+| `MAIL_FROM`   | The sender shown on the email                                                     | `janedoe@gmail.com`                                                                     |
+| `APP_URL`     | The link to be put in the email.                                                  | `http://localhost:5173/`                                                                |
+| `SMTP_USER`   | The account you log in with (often the full email address of the sending account) | `janedoe@gmail.com` (for Gmail, `MAIL_FROM` should use the same address as `SMTP_USER`) |
+| `SMTP_PASS`   | That account's password (for Gmail, an app password)                              | `vowbwoojinxjozes`                                                                      |
+| `SMTP_PORT`   | The port number on the mail server                                                | `587` (the default)                                                                     |
+| `SMTP_SECURE` | Decides whether the connection is encrypted from the start, or uses STARTTLS      | `true` only on port 465, otherwise `false`                                              |

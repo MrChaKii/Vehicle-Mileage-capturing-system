@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const User = require('./models/User');
 const FuelUsageBatch = require('./models/FuelUsageBatch');
+const { startMonthlyMileageReminder } = require('./utils/monthlyMileageReminder');
 
 const app = express();
 
@@ -42,6 +43,8 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/vehicle-m
     }
 
     console.log('MongoDB connected');
+    // Check if it is the second of the month.
+    startMonthlyMileageReminder();
   })
   .catch(err => console.error('MongoDB error:', err));
 
