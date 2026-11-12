@@ -315,6 +315,11 @@ const parseRangeBoundary = (value, endOfDay = false) => {
     return null;
   }
 
+  const calendarDate = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== value) {
+    return null;
+  }
+
   const time = endOfDay ? '23:59:59.999' : '00:00:00.000';
   const date = new Date(`${value}T${time}+05:30`);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -466,7 +471,22 @@ router.get('/analytics', async (req, res) => {
       return res.status(400).json({ error: 'End date must be on or after start date' });
     }
 
+    if (hasRequestedRange) {
+      const [startYear, startMonth, startDay] = requestedStartDate.split('-').map(Number);
+      const [endYear, endMonth, endDay] = requestedEndDate.split('-').map(Number);
+      const dateCount = (
+        Date.UTC(endYear, endMonth - 1, endDay)
+        - Date.UTC(startYear, startMonth - 1, startDay)
+      ) / 86400000 + 1;
+
+      if (dateCount > 60) {
+        return res.status(400).json({ error: 'Date range cannot exceed 60 days' });
+      }
+    }
+
     const requestedMonth = req.query.month?.trim();
+    const requestedCategory = req.query.category?.trim().toLowerCase();
+    const requestedVehicleNumber = req.query.vehicleNumber?.trim().toUpperCase();
 
     if (requestedMonth && !monthInputPattern.test(requestedMonth)) {
       return res.status(400).json({ error: 'Month must be in YYYY-MM format' });
@@ -481,6 +501,9 @@ router.get('/analytics', async (req, res) => {
       CompanyDriver.countDocuments()
     ]);
 
+    const vehicleCategoryByNumber = new Map(
+      vehicles.map(vehicle => [vehicle.vehicleNumber, vehicle.ownership || 'unknown'])
+    );
     const selectedMonth = requestedMonth || getColomboDateKey(new Date()).slice(0, 7);
     const [selectedYear, selectedMonthNumber] = selectedMonth.split('-').map(Number);
     const selectedMonthStart = parseRangeBoundary(`${selectedMonth}-01`);
@@ -622,7 +645,13 @@ router.get('/analytics', async (req, res) => {
     const rangeReadings = hasRequestedRange
       ? readings.filter(reading => {
         const readingDate = new Date(reading.readingDate);
-        return readingDate >= rangeStart && readingDate <= rangeEnd;
+        const vehicleNumber = reading.vehicleId?.toUpperCase();
+        const category = vehicleCategoryByNumber.get(vehicleNumber) || 'unknown';
+
+        return readingDate >= rangeStart
+          && readingDate <= rangeEnd
+          && (!requestedVehicleNumber || vehicleNumber === requestedVehicleNumber)
+          && (!requestedCategory || category.toLowerCase() === requestedCategory);
       })
       : [];
     const rangeUsage = createRangeUsage(rangeReadings, userMap);

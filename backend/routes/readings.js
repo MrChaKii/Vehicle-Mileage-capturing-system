@@ -91,6 +91,7 @@ router.get('/options', async (req, res) => {
 router.post('/', uploadMeterImage, async (req, res) => {
   try {
     const { vehicleId, mileage, location, driverName, division, divisionName, reason } = req.body;
+    const rentalRequested = req.body.isRental === 'true';
 
     if (!req.file) {
       return res.status(400).json({ error: 'A camera photo is required' });
@@ -111,12 +112,32 @@ router.post('/', uploadMeterImage, async (req, res) => {
       }
     }
 
+    const normalizedVehicleId = vehicleId.toUpperCase().trim();
+
     // Optional: Validate against last reading to prevent rollback
-    const lastReading = await Reading.findOne({ vehicleId }).sort({ readingDate: -1 });
+    const [lastReading, lastRentalReading] = await Promise.all([
+      Reading.findOne({ vehicleId: normalizedVehicleId }).sort({ readingDate: -1 }),
+      Reading.findOne({ vehicleId: normalizedVehicleId, isRental: true }).sort({ readingDate: -1 })
+    ]);
+
+    const rentalIsOpen = lastRentalReading?.meterType === 'out';
+    if (rentalIsOpen && !rentalRequested) {
+      return res.status(409).json({
+        error: 'This vehicle is checked out as a rental. Record its IN return reading before using normal vehicle readings.'
+      });
+    }
+
+    if (rentalRequested && !rentalIsOpen && lastReading?.meterType === 'out' && !lastReading.isRental) {
+      return res.status(409).json({
+        error: 'This vehicle is already checked out. Record its IN return reading before starting a rental.'
+      });
+    }
 
     // Driver login on a pool vehicle: readings alternate between OUT and IN
     let meterType = null;
-    if (req.user.role === 'driver') {
+    if (rentalRequested) {
+      meterType = rentalIsOpen ? 'in' : 'out';
+    } else if (req.user.role === 'driver') {
       const vehicle = await Vehicle.findOne({ vehicleNumber: vehicleId.toUpperCase().trim() }).select('ownership');
 
       if (vehicle?.ownership === 'pool') {
@@ -143,7 +164,8 @@ router.post('/', uploadMeterImage, async (req, res) => {
 
     // Pool vehicles: last IN and next OUT should be at most 1km apart.
     // A larger gap is informational only; the reading is still saved.
-    const exceedsPoolGap = meterType === 'out'
+    const exceedsPoolGap = !rentalRequested
+      && meterType === 'out'
       && lastReading?.meterType === 'in'
       && mileageNumber - lastReading.extractedMileage > MAX_POOL_IN_TO_OUT_GAP_KM;
 
@@ -154,10 +176,19 @@ router.post('/', uploadMeterImage, async (req, res) => {
         'image/png': 'png',
         'image/webp': 'webp'
       }[req.file.mimetype];
+      const fileNamePart = value => value.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const vehicleNumber = vehicleId.toUpperCase().trim();
+      const timestamp = new Date().toISOString().replace('T', '_').replace(/[:.]/g, '-');
+      const fileName = [
+        fileNamePart(vehicleNumber),
+        fileNamePart(req.user.username),
+        timestamp
+      ].join('_');
+
       driveFileId = await uploadMeterPhoto({
         buffer: req.file.buffer,
         contentType: req.file.mimetype,
-        fileName: `meter-${vehicleId.toUpperCase().trim()}-${Date.now()}.${fileExtension}`
+        fileName: `${fileName}.${fileExtension}`
       });
     } catch (error) {
       console.error('Google Drive meter photo upload error:', {
@@ -185,7 +216,8 @@ router.post('/', uploadMeterImage, async (req, res) => {
       division: division || null,
       divisionName: divisionName || '',
       reason: reason || '',
-      meterType
+      meterType,
+      isRental: rentalRequested
     });
 
     try {
@@ -207,6 +239,7 @@ router.post('/', uploadMeterImage, async (req, res) => {
         mileage: reading.extractedMileage,
         date: reading.readingDate,
         meterType: reading.meterType,
+        isRental: reading.isRental,
         hasMeterImage: true
       },
       ...(exceedsPoolGap && {
@@ -516,6 +549,21 @@ router.get('/:id/image', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
         ? error.message
         : 'Failed to load meter photo from Google Drive. Check backend logs and Drive permissions.'
     });
+  }
+});
+
+// GET /api/readings/rental-status/:vehicleId — Current rental checkout state
+router.get('/rental-status/:vehicleId', async (req, res) => {
+  try {
+    const vehicleId = req.params.vehicleId.toUpperCase().trim();
+    const latestRentalReading = await Reading.findOne({ vehicleId, isRental: true })
+      .sort({ readingDate: -1 })
+      .select('meterType');
+
+    res.json({ isOut: latestRentalReading?.meterType === 'out' });
+  } catch (error) {
+    console.error('Rental status load error:', error);
+    res.status(500).json({ error: 'Failed to load rental status' });
   }
 });
 

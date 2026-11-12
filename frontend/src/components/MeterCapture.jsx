@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api';
 
-const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason, onSaved }) => {
+const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason, allowRental = false, onSaved }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -14,8 +14,36 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
   const [success, setSuccess] = useState(false);
   const [saveWarning, setSaveWarning] = useState('');
   const [saving, setSaving] = useState(false);
+  const [rentalChecked, setRentalChecked] = useState(false);
+  const [rentalIsOpen, setRentalIsOpen] = useState(false);
+  const [rentalStatusLoading, setRentalStatusLoading] = useState(allowRental);
   const isCameraAvailable = typeof navigator !== 'undefined'
     && Boolean(navigator.mediaDevices?.getUserMedia);
+
+  useEffect(() => {
+    if (!allowRental) return undefined;
+
+    let isActive = true;
+    api.get(`/readings/rental-status/${vehicleId}`)
+      .then(response => {
+        if (!isActive) return;
+        const isOut = Boolean(response.data.isOut);
+        setRentalIsOpen(isOut);
+        setRentalChecked(isOut);
+      })
+      .catch(statusError => {
+        if (isActive) {
+          setError(statusError.response?.data?.error || 'Failed to load rental status.');
+        }
+      })
+      .finally(() => {
+        if (isActive) setRentalStatusLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [allowRental, vehicleId]);
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach(track => track.stop());
@@ -119,6 +147,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
     data.append('division', divisionId || '');
     data.append('divisionName', divisionName || '');
     data.append('reason', reason || '');
+    data.append('isRental', String(rentalChecked));
 
     try {
       if (navigator.geolocation) {
@@ -139,8 +168,14 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
 
       const response = await api.post('/readings', data, { timeout: 30000 });
       const meterType = response.data.reading?.meterType;
-      setSuccess(meterType ? `${meterType.toUpperCase()} Reading Saved!` : 'Reading Saved!');
+      const isRental = response.data.reading?.isRental;
+      setSuccess(meterType ? `${isRental ? 'Rental ' : ''}${meterType.toUpperCase()} Reading Saved!` : 'Reading Saved!');
       setSaveWarning(response.data.warning || '');
+      if (isRental) {
+        const isOut = meterType === 'out';
+        setRentalIsOpen(isOut);
+        setRentalChecked(isOut);
+      }
       onSaved?.();
       window.setTimeout(() => {
         resetCapture();
@@ -164,6 +199,37 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
       {saveWarning && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3" role="status">
           {saveWarning}
+        </div>
+      )}
+
+      {allowRental && (
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={rentalChecked}
+              disabled={rentalStatusLoading || rentalIsOpen || saving}
+              onChange={event => setRentalChecked(event.target.checked)}
+              className="mt-1 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-slate-800">Rental vehicle</span>
+              <span className="block text-sm text-slate-500 mt-1">
+                {rentalStatusLoading
+                  ? 'Checking rental status...'
+                  : rentalIsOpen
+                    ? 'Vehicle is checked out. Record the IN return reading to unlock normal readings.'
+                    : rentalChecked
+                      ? 'This reading will be OUT (checkout). Record an IN reading when the vehicle is returned.'
+                      : 'Tick this when recording a rental checkout and return.'}
+              </span>
+            </span>
+          </label>
+          {rentalChecked && !rentalStatusLoading && (
+            <p className="text-xs font-semibold text-brand-700 mt-3 ml-7">
+              Next reading: {rentalIsOpen ? 'IN — Rental return' : 'OUT — Rental checkout'}
+            </p>
+          )}
         </div>
       )}
 
@@ -236,7 +302,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
             <button
               type="button"
               onClick={submitReading}
-              disabled={saving || success}
+              disabled={saving || success || rentalStatusLoading}
               className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save reading'}

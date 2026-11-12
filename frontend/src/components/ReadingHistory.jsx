@@ -216,6 +216,12 @@ const ReadingHistory = ({ vehicleId, showTrips = false, refreshKey = 0 }) => {
                       <span className="text-xs text-slate-400 ml-1">km</span>
                     </td>
                     <td className="py-3 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        {r.meterType && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-brand-50 text-brand-700">
+                            {r.isRental ? 'Rental ' : ''}{r.meterType.toUpperCase()}
+                          </span>
+                        )}
                       {r.isCorrected ? (
                         <span className="inline-flex items-center gap-1 text-amber-600 text-xs font-medium">
                           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -231,6 +237,7 @@ const ReadingHistory = ({ vehicleId, showTrips = false, refreshKey = 0 }) => {
                           Manual
                         </span>
                       )}
+                      </div>
                     </td>
                   </tr>
                 ))}

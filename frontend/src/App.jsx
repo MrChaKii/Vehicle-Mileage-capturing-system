@@ -727,7 +727,11 @@ function App() {
                   <div className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" />
                   <h2 className="text-lg font-semibold text-slate-900">New Reading</h2>
                 </div>
-                <MeterCapture key={`capture-${assignedVehicle}`} vehicleId={assignedVehicle} />
+                <MeterCapture
+                  key={`capture-${assignedVehicle}`}
+                  vehicleId={assignedVehicle}
+                  allowRental={user.role === 'user'}
+                />
               </div>
 
               <div>

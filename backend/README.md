@@ -12,7 +12,9 @@ provider's environment-variable settings.
 
 Meter photos are uploaded to a private Google Drive folder. The database stores
 the Drive file ID; image requests are served by the backend only to admin and
-superadmin accounts.
+superadmin accounts. Uploaded image filenames contain the vehicle number,
+authenticated username, and UTC date/time (for example,
+`ABC-123_jane_doe_2026-11-10_09-19-52-622Z.jpg`).
 
 1. Enable the Google Drive API in the Google Cloud project associated with the
    existing OAuth client.

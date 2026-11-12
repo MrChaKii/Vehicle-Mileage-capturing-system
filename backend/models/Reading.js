@@ -72,6 +72,10 @@ const readingSchema = new mongoose.Schema({
     type: String,
     enum: ['out', 'in', null],
     default: null
+  },
+  isRental: {
+    type: Boolean,
+    default: false
   }
 }, { timestamps: true });
 

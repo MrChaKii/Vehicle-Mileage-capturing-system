@@ -71,7 +71,7 @@ function exportToCSV(readings) {
   const rows = readings.map(r => [
     new Date(r.readingDate).toLocaleString(),
     r.vehicleId,
-    r.meterType ? r.meterType.toUpperCase() : '',
+    r.meterType ? `${r.isRental ? 'RENTAL ' : ''}${r.meterType.toUpperCase()}` : '',
     r.driverName ? `${r.driverName} (Driver)` : r.submittedByName || r.submittedBy,
     r.extractedMileage,
     r.isCorrected ? 'Yes' : 'No',
@@ -732,7 +732,9 @@ const ReadingsAdmin = () => {
 
                     {/* Meter */}
                     <td className="px-4 py-3.5 text-sm font-semibold text-slate-700 whitespace-nowrap">
-                      {reading.meterType ? reading.meterType.toUpperCase() : <span className="font-normal text-slate-400">—</span>}
+                      {reading.meterType
+                        ? `${reading.isRental ? 'RENTAL ' : ''}${reading.meterType.toUpperCase()}`
+                        : <span className="font-normal text-slate-400">—</span>}
                     </td>
 
                     {/* User */}
