@@ -1245,7 +1245,7 @@ const AnalyticsDashboard = () => {
       <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Admin</p>
-          <h2 className="text-2xl font-bold text-slate-950 mt-0.5">AutoInsights Analytics</h2>
+          <h2 className="text-2xl font-bold text-slate-950 mt-0.5">CWM AutoInsights Analytics</h2>
           <p className="text-sm text-slate-500 mt-1">
             Executive mileage insights across vehicles, drivers, and usage.
           </p>

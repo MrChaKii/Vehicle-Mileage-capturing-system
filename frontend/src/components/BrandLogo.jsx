@@ -5,7 +5,7 @@ const BrandLogo = ({ className = 'h-10 w-10' }) => (
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="AutoInsights logo"
+    aria-label="CWM AutoInsights logo"
   >
     <defs>
       <linearGradient id="autoInsightsGradient" x1="7" y1="5" x2="42" y2="44" gradientUnits="userSpaceOnUse">

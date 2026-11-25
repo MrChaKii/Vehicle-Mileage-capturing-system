@@ -376,8 +376,8 @@ function App() {
           <div className="flex items-center gap-3">
             <BrandLogo className="h-10 w-10 shrink-0 drop-shadow-sm" />
             <div>
-              <h1 className="text-lg font-bold leading-tight tracking-tight"><span className="text-slate-950">Auto</span><span className="text-brand-600">Insights</span></h1>
-              <p className="text-xs text-slate-500">{isAdmin ? 'Admin control panel' : 'Camera-based odometer tracking'}</p>
+              <h1 className="text-lg font-bold leading-tight tracking-tight"><span className="text-slate-950">CWM Auto</span><span className="text-brand-600">Insights</span></h1>
+              <p className="text-xs text-slate-500">{'Vehicle Mileage & Usage Intelligence'}</p>
             </div>
           </div>
 

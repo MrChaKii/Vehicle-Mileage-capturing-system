@@ -31,7 +31,7 @@ const LoginPage = ({ onLogin }) => {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <BrandLogo className="mx-auto mb-4 h-16 w-16 drop-shadow-lg" />
-          <h1 className="text-3xl font-bold tracking-tight"><span className="text-slate-950">Auto</span><span className="text-brand-600">Insights</span></h1>
+          <h1 className="text-3xl font-bold tracking-tight"><span className="text-slate-950">CWM Auto</span><span className="text-brand-600">Insights</span></h1>
           <p className="mt-1.5 text-sm font-medium text-slate-500">Vehicle Mileage &amp; Usage Intelligence</p>
         </div>
 
