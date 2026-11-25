@@ -410,7 +410,6 @@ const createRangeUsage = (readings, userMap, { includeSingleReadingSessions = fa
             gapFromPrevious: previousEntry
               ? Math.round(entry.reading.extractedMileage - previousEntry.reading.extractedMileage)
               : null,
-            ocrConfidence: entry.reading.ocrConfidence,
             isCorrected: entry.reading.isCorrected,
             originalMileage: entry.reading.originalMileage,
             divisionName: entry.reading.divisionName || '',
@@ -603,7 +602,7 @@ router.get('/analytics', async (req, res) => {
     const [readings, vehicles, users, companyDriverCount] = await Promise.all([
       Reading.find({ isRental: { $ne: true } })
         .sort({ vehicleId: 1, readingDate: 1 })
-        .select('vehicleId extractedMileage ocrConfidence readingDate isCorrected submittedBy driverName meterType'),
+        .select('vehicleId extractedMileage readingDate isCorrected submittedBy driverName meterType'),
       Vehicle.find().sort({ vehicleNumber: 1 }).select('-__v'),
       User.find().select('name employeeId username role isActive'),
       CompanyDriver.countDocuments()
