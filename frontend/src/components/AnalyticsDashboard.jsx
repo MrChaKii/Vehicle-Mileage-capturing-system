@@ -55,10 +55,6 @@ const formatReadingDetailTime = (value) => {
   });
 };
 
-const formatConfidence = (value) => (
-  typeof value === 'number' ? `${Math.round(value * 100)}%` : '-'
-);
-
 const getDateInputValue = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -140,7 +136,7 @@ const getMaximumRangeEndDate = (startDate) => {
 };
 
 const exportUserReport = (rows, startDate, endDate) => {
-  const headers = ['User', 'Employee ID', 'Vehicle', 'First recording', 'Last recording', 'Start mileage (km)', 'End mileage (km)', 'Mileage gap (km)', 'Recordings'];
+  const headers = ['User', 'Employee ID', 'Vehicle', 'First recording', 'Last recording', 'Start mileage (km)', 'End mileage (km)', 'Driven KM', 'Recordings'];
   const csvRows = rows.map(row => [
     row.name,
     row.employeeId,
@@ -618,7 +614,7 @@ const ReadingDetailsModal = ({ usage, onClose }) => {
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="grid grid-cols-1 gap-3 border-b border-slate-200 bg-slate-50 px-6 py-4 sm:grid-cols-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total gap</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Driven KM</p>
               {usage.isPending ? (
                 <span className="mt-1 inline-flex rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-sm font-semibold text-amber-800">Pending</span>
               ) : (
@@ -643,8 +639,7 @@ const ReadingDetailsModal = ({ usage, onClose }) => {
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Reading</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Recorded at</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Odometer</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Gap</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">OCR confidence</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">Driven KM</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Details</th>
                 </tr>
               </thead>
@@ -666,10 +661,9 @@ const ReadingDetailsModal = ({ usage, onClose }) => {
                       <td className={`whitespace-nowrap px-4 py-4 text-right font-mono text-sm font-semibold ${reading.gapFromPrevious < 0 ? 'text-red-600' : 'text-brand-700'}`}>
                         {reading.gapFromPrevious == null ? '-' : formatKm(reading.gapFromPrevious)}
                       </td>
-                      <td className="px-4 py-4 text-right font-mono text-sm text-slate-700">{formatConfidence(reading.ocrConfidence)}</td>
                       <td className="px-4 py-4">
                         <p className={`text-xs font-semibold ${reading.isCorrected ? 'text-amber-700' : 'text-emerald-700'}`}>
-                          {reading.isCorrected ? 'Corrected' : 'OCR reading'}
+                          {reading.isCorrected ? 'Corrected' : 'Recorded'}
                         </p>
                         {reading.isCorrected && reading.originalMileage != null && (
                           <p className="mt-1 text-xs text-slate-500">Original: {formatKm(reading.originalMileage)}</p>

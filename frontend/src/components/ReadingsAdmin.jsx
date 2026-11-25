@@ -64,16 +64,36 @@ function exportToCSV(readings) {
     'Meter',
     'User',
     'Mileage (km)',
+    'Driven KM',
     'Corrected',
     'Original Mileage',
     'Submitted By',
   ];
+
+  const chronologicalReadings = [...readings].sort((left, right) => {
+    const vehicleComparison = String(left.vehicleId || '').localeCompare(String(right.vehicleId || ''));
+    if (vehicleComparison !== 0) return vehicleComparison;
+    return new Date(left.readingDate).getTime() - new Date(right.readingDate).getTime();
+  });
+  const previousMileageByVehicle = new Map();
+  const drivenKmByReadingId = new Map();
+
+  chronologicalReadings.forEach(reading => {
+    const previousMileage = previousMileageByVehicle.get(String(reading.vehicleId || ''));
+    const drivenKm = previousMileage == null
+      ? ''
+      : Number(reading.extractedMileage) - Number(previousMileage);
+    drivenKmByReadingId.set(reading._id, drivenKm);
+    previousMileageByVehicle.set(String(reading.vehicleId || ''), Number(reading.extractedMileage));
+  });
+
   const rows = readings.map(r => [
     new Date(r.readingDate).toLocaleString(),
     r.vehicleId,
     r.meterType ? `${r.isRental ? 'RENTAL ' : ''}${r.meterType.toUpperCase()}` : '',
     r.driverName ? `${r.driverName} (Driver)` : r.submittedByName || r.submittedBy,
     r.extractedMileage,
+    drivenKmByReadingId.get(r._id) ?? '',
     r.isCorrected ? 'Yes' : 'No',
     r.originalMileage ?? '',
     r.submittedByName || 'Unknown User',
