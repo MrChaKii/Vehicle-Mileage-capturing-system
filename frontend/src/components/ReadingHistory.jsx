@@ -46,27 +46,17 @@ const ReadingHistory = ({ vehicleId, showTrips = false, refreshKey = 0 }) => {
   const [readings, setReadings] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [manualRefreshKey, setManualRefreshKey] = useState(0);
 
-  const fetchData = async () => {
+  const refreshHistory = () => {
     setLoading(true);
-    try {
-      const [readingsRes, statsRes] = await Promise.all([
-        api.get(`/readings/${vehicleId}`),
-        api.get(`/readings/stats/${vehicleId}`).catch(() => ({ data: null }))
-      ]);
-      setReadings(readingsRes.data);
-      setStats(statsRes.data);
-    } catch (err) {
-      console.error('Failed to fetch history', err);
-    } finally {
-      setLoading(false);
-    }
+    setManualRefreshKey(key => key + 1);
   };
 
   useEffect(() => {
     let isActive = true;
 
-    const loadInitialData = async () => {
+    const loadHistory = async () => {
       try {
         const [readingsRes, statsRes] = await Promise.all([
           api.get(`/readings/${vehicleId}`),
@@ -88,12 +78,12 @@ const ReadingHistory = ({ vehicleId, showTrips = false, refreshKey = 0 }) => {
       }
     };
 
-    loadInitialData();
+    loadHistory();
 
     return () => {
       isActive = false;
     };
-  }, [vehicleId, refreshKey]);
+  }, [vehicleId, refreshKey, manualRefreshKey]);
 
   if (loading) {
     return (
@@ -108,22 +98,23 @@ const ReadingHistory = ({ vehicleId, showTrips = false, refreshKey = 0 }) => {
     );
   }
 
+  const hasRentalTrips = stats?.completedRentalTrips > 0;
+
   return (
     <div className="space-y-6">
       {/* Stats Cards */}
-      {stats && stats.totalReadings > 1 && (
-        <div className="grid grid-cols-3 gap-4">
+      {stats && (stats.totalReadings > 1 || hasRentalTrips) && (
+        <div className="grid grid-cols-2 gap-4">
           <div className="card p-4 text-center">
             <p className="text-2xl font-bold text-brand-700">{stats.totalDistance?.toLocaleString()}</p>
             <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Total km</p>
+            {hasRentalTrips && (
+              <p className="mt-1 text-xs text-slate-500">Includes {stats.rentalDistance.toLocaleString()} rental km</p>
+            )}
           </div>
           <div className="card p-4 text-center">
             <p className="text-2xl font-bold text-emerald-600">{stats.averageDaily}</p>
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Daily Avg</p>
-          </div>
-          <div className="card p-4 text-center">
-            <p className="text-2xl font-bold text-slate-700">{stats.totalReadings}</p>
-            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Readings</p>
+            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">{hasRentalTrips ? 'Vehicle daily avg' : 'Daily avg'}</p>
           </div>
         </div>
       )}
@@ -132,7 +123,7 @@ const ReadingHistory = ({ vehicleId, showTrips = false, refreshKey = 0 }) => {
       <div className="card overflow-hidden">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-900">Reading History</h3>
-          <button onClick={fetchData} className="text-sm text-brand-600 hover:text-brand-700 font-medium">
+          <button onClick={refreshHistory} className="text-sm text-brand-600 hover:text-brand-700 font-medium">
             ↻ Refresh
           </button>
         </div>

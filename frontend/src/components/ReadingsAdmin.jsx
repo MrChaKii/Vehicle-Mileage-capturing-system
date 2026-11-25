@@ -63,9 +63,9 @@ function exportToCSV(readings) {
     'Vehicle',
     'Meter',
     'User',
+    'Before Mileage',
     'Mileage (km)',
-    'Corrected',
-    'Original Mileage',
+    'KM',
     'Submitted By',
   ];
   const rows = readings.map(r => [
@@ -73,9 +73,9 @@ function exportToCSV(readings) {
     r.vehicleId,
     r.meterType ? `${r.isRental ? 'RENTAL ' : ''}${r.meterType.toUpperCase()}` : '',
     r.driverName ? `${r.driverName} (Driver)` : r.submittedByName || r.submittedBy,
+    r.beforeMileage ?? '',
     r.extractedMileage,
-    r.isCorrected ? 'Yes' : 'No',
-    r.originalMileage ?? '',
+    r.mileageGap ?? '',
     r.submittedByName || 'Unknown User',
   ]);
 
@@ -287,7 +287,7 @@ const ReadingsAdmin = () => {
       let currentPage = 1;
       let totalPages = 1;
       do {
-        const params = buildParams(currentPage);
+        const params = { ...buildParams(currentPage), includeMileageGap: 'true' };
         const res = await api.get('/readings', { params });
         allReadings = [...allReadings, ...res.data.readings];
         totalPages = res.data.pages;
