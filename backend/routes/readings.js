@@ -8,6 +8,7 @@ const Division = require('../models/Division');
 const User = require('../models/User');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 const { uploadMeterPhoto, downloadMeterPhoto, deleteMeterPhoto } = require('../utils/cloudinary');
+const createReadingsWorkbook = require('../utils/readingsWorkbook');
 
 // Calendar date (YYYY-MM-DD) in Sri Lankan time.
 const getColomboDateKey = (value) => {
@@ -366,7 +367,38 @@ const getExportMileage = async (reading) => {
   };
 };
 
-// GET /api/readings — All readings (admin, filterable + paginated)
+const formatAdminReadings = async (readings, includeMileageGap) => {
+  if (readings.length === 0) return [];
+
+  const submittedByValues = [...new Set(readings.map(reading => String(reading.submittedBy || '')).filter(Boolean))];
+  const objectIdValues = submittedByValues.filter(value => /^[a-f\d]{24}$/i.test(value));
+  const [users, exportMileage] = await Promise.all([
+    User.find({
+      $or: [
+        ...(objectIdValues.length ? [{ _id: { $in: objectIdValues } }] : []),
+        { username: { $in: submittedByValues } },
+        { employeeId: { $in: submittedByValues } }
+      ]
+    }).select('name username employeeId'),
+    includeMileageGap ? Promise.all(readings.map(getExportMileage)) : []
+  ]);
+  const userMap = new Map();
+  users.forEach(user => {
+    userMap.set(user._id.toString(), user);
+    if (user.username) userMap.set(user.username, user);
+    if (user.employeeId) userMap.set(user.employeeId, user);
+  });
+  return readings.map((reading, index) => {
+    const user = userMap.get(String(reading.submittedBy));
+    return {
+      ...reading.toObject(),
+      ...exportMileage[index],
+      submittedByName: user?.name || user?.username || 'Unknown User'
+    };
+  });
+};
+
+// GET /api/readings — Filtered admin readings. format=xlsx exports every matching row.
 router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
   try {
     const { vehicleId, driverName, userKey, startDate, endDate, ownership, month, page = 1 } = req.query;
@@ -412,6 +444,18 @@ router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
       }
     }
 
+    const readingsQuery = Reading.find(filter).sort(latestReadingOrder).select('-__v');
+    if (req.query.format === 'xlsx') {
+      const workbook = createReadingsWorkbook();
+      await readingsQuery.cursor().eachAsync(async batch => {
+        workbook.appendReadings(await formatAdminReadings(batch, true));
+      }, { batchSize: PAGE_SIZE });
+      const buffer = await workbook.writeBuffer();
+      const date = getColomboDateKey(new Date());
+      res.attachment(`mileage_readings_${date}.xlsx`);
+      return res.send(buffer);
+    }
+
     const skip = (parseInt(page, 10) - 1) * PAGE_SIZE;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -420,11 +464,7 @@ router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
     const todayFilter = { readingDate: { $gte: todayStart, $lt: tomorrowStart } };
 
     const [readings, total, todayTotalReadings, allVehicleCount, regularUserCount, companyDriverCount, todayCorrectedRecords] = await Promise.all([
-      Reading.find(filter)
-        .sort(latestReadingOrder)
-        .skip(skip)
-        .limit(PAGE_SIZE)
-        .select('-__v'),
+      readingsQuery.skip(skip).limit(PAGE_SIZE),
       Reading.countDocuments(filter),
       Reading.countDocuments(todayFilter),
       Vehicle.countDocuments(),
@@ -434,29 +474,7 @@ router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
     ]);
     const allUserCount = regularUserCount + companyDriverCount;
 
-    const submittedByValues = [...new Set(readings.map(reading => String(reading.submittedBy || '')).filter(Boolean))];
-    const objectIdValues = submittedByValues.filter(value => /^[a-f\d]{24}$/i.test(value));
-    const [users, exportMileage] = await Promise.all([
-      User.find({
-        $or: [
-          ...(objectIdValues.length ? [{ _id: { $in: objectIdValues } }] : []),
-          { username: { $in: submittedByValues } },
-          { employeeId: { $in: submittedByValues } }
-        ]
-      }).select('name username employeeId'),
-      req.query.includeMileageGap === 'true' ? Promise.all(readings.map(getExportMileage)) : []
-    ]);
-    const userMap = new Map();
-    users.forEach(user => {
-      userMap.set(user._id.toString(), user);
-      if (user.username) userMap.set(user.username, user);
-      if (user.employeeId) userMap.set(user.employeeId, user);
-    });
-    const readingsWithUserNames = readings.map((reading, index) => ({
-      ...reading.toObject(),
-      ...exportMileage[index],
-      submittedByName: userMap.get(String(reading.submittedBy))?.name || userMap.get(String(reading.submittedBy))?.username || 'Unknown User'
-    }));
+    const readingsWithUserNames = await formatAdminReadings(readings, req.query.includeMileageGap === 'true');
 
     res.json({
       readings: readingsWithUserNames,
