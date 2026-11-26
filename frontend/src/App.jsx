@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import api from './api';
 import AdminDashboard from './components/AdminDashboard';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
@@ -190,17 +190,19 @@ function App() {
   const [selectedVehicleNumber, setSelectedVehicleNumber] = useState('');
 
   // Driver login: vehicle, driver name & division (for pool vehicles) dropdowns
-  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [], divisions: [], users: [] });
+  const [driverOptions, setDriverOptions] = useState({ vehicles: [], companyDrivers: [], divisions: [], users: [], openTrips: [] });
   const [driverOptionsLoaded, setDriverOptionsLoaded] = useState(false);
+  const [driverOptionsRetry, setDriverOptionsRetry] = useState(0);
   const [selectedDriverVehicle, setSelectedDriverVehicle] = useState('');
   const [selectedDriverName, setSelectedDriverName] = useState('');
   const [selectedSpecialUser, setSelectedSpecialUser] = useState('');
   const [selectedDivision, setSelectedDivision] = useState('');
   const [poolVehicleReason, setPoolVehicleReason] = useState('');
   const [driverSelectionConfirmed, setDriverSelectionConfirmed] = useState(false);
+  const [returnTrip, setReturnTrip] = useState(null);
+  const [savedDriverReading, setSavedDriverReading] = useState(null);
   const [driverOptionsError, setDriverOptionsError] = useState(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
-  const hasAutoFilledHire = useRef(false);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -259,58 +261,52 @@ function App() {
     }
   }, [authChecked, user]);
 
-  // Auto-load vehicle, driver name & division options when a driver logs in
+  // Refresh availability while the driver workspace is open.
   useEffect(() => {
-    if (!user || user.role !== 'driver') return;
+    if (user?.role !== 'driver' || driverSelectionConfirmed) return;
+
+    const controller = new AbortController();
+    let loadingOptions = false;
     const loadOptions = async () => {
-      setDriverOptionsError(null);
+      if (loadingOptions) return;
+      loadingOptions = true;
       try {
-        const res = await api.get('/readings/options');
+        const res = await api.get('/readings/options', { signal: controller.signal, timeout: 10000 });
+        if (controller.signal.aborted) return;
         setDriverOptions(res.data);
+        const { vehicles, companyDrivers, users } = res.data;
+        setSelectedDriverVehicle(value => vehicles.some(vehicle => vehicle.vehicleNumber === value) ? value : '');
+        setSelectedDriverName(value => {
+          if (value === SPECIAL_USER_OPTION) return value;
+          return companyDrivers.some(driver => driver.employeeName === value) ? value : '';
+        });
+        setSelectedSpecialUser(value => users.some(person => person.name === value) ? value : '');
         setDriverOptionsLoaded(true);
+        setDriverOptionsError(null);
       } catch {
-        setDriverOptionsError('Failed to load options. Please retry.');
+        if (!controller.signal.aborted) {
+          setDriverOptionsError('Could not refresh trip availability. Please retry.');
+        }
+      } finally {
+        loadingOptions = false;
       }
     };
     loadOptions();
-  }, [user]);
-
-  // Returning a pool vehicle: auto-fill division & reason from the person's OUT reading
-  useEffect(() => {
-    const personName = selectedDriverName === SPECIAL_USER_OPTION ? selectedSpecialUser : selectedDriverName;
-    const isPoolVehicle = driverOptions.vehicles.some(vehicle => (
-      vehicle.vehicleNumber === selectedDriverVehicle && vehicle.ownership === 'pool'
-    ));
-
-    if (driverSelectionConfirmed || !isPoolVehicle || !personName) return;
-
-    let isActive = true;
-
-    api.get(`/readings/${selectedDriverVehicle}`)
-      .then(res => {
-        if (!isActive) return;
-
-        const latest = res.data.find(reading => reading.meterType);
-        const isOutWithPerson = latest?.meterType === 'out'
-          && latest.driverName?.trim().toLowerCase() === personName.trim().toLowerCase();
-
-        if (isOutWithPerson) {
-          const divisionExists = driverOptions.divisions.some(division => division._id === latest.division);
-          setSelectedDivision(divisionExists ? latest.division : '');
-          setPoolVehicleReason(latest.reason || '');
-          hasAutoFilledHire.current = true;
-        } else if (hasAutoFilledHire.current) {
-          setSelectedDivision('');
-          setPoolVehicleReason('');
-          hasAutoFilledHire.current = false;
-        }
-      })
-      .catch(err => console.error('Failed to load current hire', err));
+    const timer = window.setInterval(loadOptions, 15000);
 
     return () => {
-      isActive = false;
+      controller.abort();
+      window.clearInterval(timer);
     };
-  }, [selectedDriverVehicle, selectedDriverName, selectedSpecialUser, driverSelectionConfirmed, driverOptions]);
+  }, [user, driverSelectionConfirmed, driverOptionsRetry]);
+
+  const resetDriverCheckout = () => {
+    setSelectedDriverVehicle('');
+    setSelectedDriverName('');
+    setSelectedSpecialUser('');
+    setSelectedDivision('');
+    setPoolVehicleReason('');
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('authToken');
@@ -318,13 +314,12 @@ function App() {
     setUser(null);
     setAdminPage('dashboard');
     setSelectedVehicleNumber('');
-    setSelectedDriverVehicle('');
-    setSelectedDriverName('');
-    setSelectedSpecialUser('');
-    setSelectedDivision('');
-    setPoolVehicleReason('');
+    resetDriverCheckout();
+    setReturnTrip(null);
+    setSavedDriverReading(null);
     setDriverSelectionConfirmed(false);
     setDriverOptionsLoaded(false);
+    setDriverOptionsError(null);
   };
 
   const navigateToAdminPage = (path) => {
@@ -352,13 +347,21 @@ function App() {
   const isAdmin = hasAdminAccess(user.role);
   const isSuperAdmin = isSuperAdminRole(user.role);
   const isDriver = user.role === 'driver';
-  const isPoolVehicleSelected = driverOptions.vehicles.some(vehicle => (
-    vehicle.vehicleNumber === selectedDriverVehicle && vehicle.ownership === 'pool'
-  ));
+  const isDriverVehicleAvailable = driverOptions.vehicles.some(vehicle => vehicle.vehicleNumber === selectedDriverVehicle);
   const isSpecialUserSelected = selectedDriverName === SPECIAL_USER_OPTION;
-  const driverDisplayName = isSpecialUserSelected ? selectedSpecialUser : selectedDriverName;
-  const isDriverSelectionComplete = selectedDriverVehicle && driverDisplayName && selectedDivision && poolVehicleReason.trim();
-  const selectedDivisionName = driverOptions.divisions.find(division => division._id === selectedDivision)?.name || '';
+  const isDriverNameAvailable = isSpecialUserSelected
+    ? driverOptions.users.some(person => person.name === selectedSpecialUser)
+    : driverOptions.companyDrivers.some(driver => driver.employeeName === selectedDriverName);
+  const availableDriverSelection = isSpecialUserSelected || isDriverNameAvailable ? selectedDriverName : '';
+  const checkoutDriverName = isSpecialUserSelected ? selectedSpecialUser : selectedDriverName;
+  const checkoutDivision = driverOptions.divisions.find(division => division._id === selectedDivision);
+  const isDriverSelectionComplete = !driverOptionsError && isDriverVehicleAvailable
+    && isDriverNameAvailable && checkoutDivision && poolVehicleReason.trim();
+  const driverVehicleNumber = returnTrip ? returnTrip.vehicleId : selectedDriverVehicle;
+  const driverDisplayName = returnTrip ? returnTrip.driverName : checkoutDriverName;
+  const driverDivisionName = returnTrip ? returnTrip.divisionName : checkoutDivision?.name;
+  const driverTripReason = returnTrip ? returnTrip.reason : poolVehicleReason.trim();
+  const openTrips = driverOptions.openTrips || [];
   const userVehicleOptions = getUserVehicleOptions(user);
   const selectedVehicleIsAssigned = userVehicleOptions.some(vehicle => vehicle.vehicleNumber === selectedVehicleNumber);
   const assignedVehicle = selectedVehicleIsAssigned
@@ -382,7 +385,7 @@ function App() {
             {!isAdmin && (!isDriver || driverSelectionConfirmed) && (
               <div className="hidden sm:flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-1.5">
                 <span className="text-xs text-slate-500 font-medium">Vehicle</span>
-                <span className="text-sm font-bold text-slate-900 font-mono">{isDriver ? selectedDriverVehicle : (assignedVehicle || 'Unassigned')}</span>
+                <span className="text-sm font-bold text-slate-900 font-mono">{isDriver ? driverVehicleNumber : (assignedVehicle || 'Unassigned')}</span>
               </div>
             )}
             <div className="hidden sm:block text-right">
@@ -469,7 +472,7 @@ function App() {
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Driver Workspace</p>
                     <h2 className="text-xl font-bold text-slate-900">Before You Scan</h2>
                     <p className="text-sm text-slate-500 mt-1">
-                      Select vehicle, name, division, and provide reason to continue.
+                      Choose an available vehicle and person, then enter the division and reason for the trip.
                     </p>
                   </div>
 
@@ -488,15 +491,10 @@ function App() {
                     <div className="space-y-2">
                       <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{driverOptionsError}</p>
                       <button
-                        onClick={async () => {
+                        onClick={() => {
+                          setDriverOptionsLoaded(false);
                           setDriverOptionsError(null);
-                          try {
-                            const res = await api.get('/readings/options');
-                            setDriverOptions(res.data);
-                            setDriverOptionsLoaded(true);
-                          } catch {
-                            setDriverOptionsError('Failed to load options. Please try again.');
-                          }
+                          setDriverOptionsRetry(retry => retry + 1);
                         }}
                         className="btn-secondary w-full text-sm"
                       >
@@ -505,7 +503,7 @@ function App() {
                     </div>
                   )}
 
-                  {driverOptionsLoaded && (
+                  {driverOptionsLoaded && !driverOptionsError && (
                     <>
                       {/* Vehicle dropdown */}
                       <div>
@@ -514,11 +512,12 @@ function App() {
                         </label>
                         <select
                           id="driverVehicleSelect"
-                          value={selectedDriverVehicle}
+                          value={isDriverVehicleAvailable ? selectedDriverVehicle : ''}
                           onChange={e => setSelectedDriverVehicle(e.target.value)}
+                          disabled={driverOptions.vehicles.length === 0}
                           className="input"
                         >
-                          <option value="">— Select a vehicle —</option>
+                          <option value="">{driverOptions.vehicles.length ? 'Select an available vehicle' : 'No vehicles available'}</option>
                           {driverOptions.vehicles.map(v => (
                             <option key={v._id} value={v.vehicleNumber}>
                               {v.vehicleNumber}{v.make || v.name ? ` — ${[v.make, v.name, v.model].filter(Boolean).join(' ')}` : ''}
@@ -534,14 +533,14 @@ function App() {
                         </label>
                         <select
                           id="driverNameSelect"
-                          value={selectedDriverName}
+                          value={availableDriverSelection}
                           onChange={e => {
                             setSelectedDriverName(e.target.value);
                             setSelectedSpecialUser('');
                           }}
                           className="input"
                         >
-                          <option value="">— Select your name —</option>
+                          <option value="">Select an available person</option>
                           {driverOptions.companyDrivers.map(d => (
                             <option key={d._id} value={d.employeeName}>
                               {d.employeeId} — {d.employeeName}
@@ -559,11 +558,12 @@ function App() {
                           </label>
                           <select
                             id="specialUserSelect"
-                            value={selectedSpecialUser}
+                            value={isDriverNameAvailable ? selectedSpecialUser : ''}
                             onChange={e => setSelectedSpecialUser(e.target.value)}
+                            disabled={driverOptions.users.length === 0}
                             className="input"
                           >
-                            <option value="">— Select the user —</option>
+                            <option value="">{driverOptions.users.length ? 'Select the user' : 'No eligible users available'}</option>
                             {driverOptions.users.map(u => (
                               <option key={u._id} value={u.name}>
                                 {u.name}
@@ -622,6 +622,42 @@ function App() {
                     </>
                   )}
                 </div>
+                {driverOptionsLoaded && !driverOptionsError && (
+                  <section className="card mt-4" aria-labelledby="vehicles-out-heading">
+                    <h2 id="vehicles-out-heading" className="text-lg font-semibold text-slate-900">Vehicles currently OUT</h2>
+                    {openTrips.length === 0 ? (
+                      <p className="mt-2 text-sm text-slate-500">No vehicles are currently checked out.</p>
+                    ) : (
+                      <>
+                        <p className="mt-1 text-sm text-slate-500">Select a vehicle to record its IN mileage.</p>
+                        <ul className="mt-4 divide-y divide-slate-100 rounded-lg border border-slate-200">
+                          {openTrips.map(trip => (
+                            <li key={trip._id}>
+                              <button
+                                type="button"
+                                className="group flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                                onClick={() => {
+                                  setReturnTrip(trip);
+                                  setDriverSelectionConfirmed(true);
+                                  window.scrollTo(0, 0);
+                                }}
+                              >
+                                <span className="min-w-0 break-words">
+                                  <span className="block font-mono text-sm font-semibold text-slate-900">{trip.vehicleId}</span>
+                                  <span className="mt-0.5 block text-sm text-slate-600">{trip.driverName || 'Driver or user unspecified'}</span>
+                                </span>
+                                <span className="flex shrink-0 items-center gap-2 sm:gap-3">
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">OUT</span>
+                                  <span className="text-sm font-semibold text-brand-700 group-hover:underline">Record IN</span>
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </section>
+                )}
               </div>
             ) : (
               // Step 2: Odometer scan
@@ -629,20 +665,22 @@ function App() {
                 <div className="card flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Driver Workspace</p>
-                    <h2 className="text-xl font-bold text-slate-900 mt-1">{selectedDriverVehicle}</h2>
-                    <p className="text-sm text-slate-500 mt-1">Driver: {driverDisplayName}</p>
-                    {isPoolVehicleSelected && (
-                      <>
-                        <p className="text-sm text-slate-500 mt-1">Division: {selectedDivisionName}</p>
-                        <p className="text-sm text-slate-500 mt-1 break-words">Reason: {poolVehicleReason.trim()}</p>
-                      </>
-                    )}
+                    <h2 className="text-xl font-bold text-slate-900 mt-1">{driverVehicleNumber}</h2>
+                    <p className="text-sm text-slate-500 mt-1">Driver / user: {driverDisplayName || 'Unspecified'}</p>
+                    {driverDivisionName && <p className="text-sm text-slate-500 mt-1">Division: {driverDivisionName}</p>}
+                    {driverTripReason && <p className="text-sm text-slate-500 mt-1 break-words">Reason: {driverTripReason}</p>}
                   </div>
                   <button
-                    onClick={() => setDriverSelectionConfirmed(false)}
+                    onClick={() => {
+                      if (savedDriverReading && !returnTrip) resetDriverCheckout();
+                      setSavedDriverReading(null);
+                      setReturnTrip(null);
+                      setDriverOptionsLoaded(false);
+                      setDriverSelectionConfirmed(false);
+                    }}
                     className="btn-secondary text-sm px-3 py-1.5"
                   >
-                    ✎ Change Selection
+                    Back to driver workspace
                   </button>
                 </div>
 
@@ -650,24 +688,35 @@ function App() {
                   <div>
                     <div className="flex items-center gap-2 mb-4">
                       <div className="w-2 h-2 bg-brand-500 rounded-full animate-pulse" />
-                      <h2 className="text-lg font-semibold text-slate-900">New Reading</h2>
+                      <h2 className="text-lg font-semibold text-slate-900">{returnTrip ? 'Return reading (IN)' : 'Checkout reading (OUT)'}</h2>
                     </div>
-                    <MeterCapture
-                      key={`capture-driver-${selectedDriverVehicle}`}
-                      vehicleId={selectedDriverVehicle}
-                      driverName={driverDisplayName}
-                      divisionId={selectedDivision}
-                      divisionName={selectedDivisionName}
-                      reason={poolVehicleReason.trim()}
-                      onSaved={() => setHistoryRefreshKey(key => key + 1)}
-                    />
+                    {savedDriverReading ? (
+                      <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                        <p className="font-semibold">{returnTrip ? 'IN reading saved. The trip is complete.' : 'OUT reading saved. The vehicle is checked out.'}</p>
+                        {savedDriverReading.warning && <p className="mt-2 text-amber-800">{savedDriverReading.warning}</p>}
+                      </div>
+                    ) : (
+                      <MeterCapture
+                        vehicleId={driverVehicleNumber}
+                        driverName={driverDisplayName}
+                        divisionId={returnTrip ? returnTrip.division : selectedDivision}
+                        divisionName={driverDivisionName}
+                        reason={driverTripReason}
+                        poolTripAction={returnTrip ? 'in' : 'out'}
+                        checkoutId={returnTrip?._id}
+                        onSaved={result => {
+                          setSavedDriverReading(result);
+                          setHistoryRefreshKey(key => key + 1);
+                        }}
+                      />
+                    )}
                   </div>
 
                   <div>
                     <h2 className="text-lg font-semibold text-slate-900 mb-4">History &amp; Stats</h2>
                     <ReadingHistory
-                      key={`history-driver-${selectedDriverVehicle}`}
-                      vehicleId={selectedDriverVehicle}
+                      key={`history-driver-${driverVehicleNumber}`}
+                      vehicleId={driverVehicleNumber}
                       showTrips
                       refreshKey={historyRefreshKey}
                     />
@@ -727,12 +776,13 @@ function App() {
                   key={`capture-${assignedVehicle}`}
                   vehicleId={assignedVehicle}
                   allowRental={user.role === 'user'}
+                  onSaved={() => setHistoryRefreshKey(key => key + 1)}
                 />
               </div>
 
               <div>
                 <h2 className="text-lg font-semibold text-slate-900 mb-4">History & Stats</h2>
-                <ReadingHistory key={`history-${assignedVehicle}`} vehicleId={assignedVehicle} />
+                <ReadingHistory key={`history-${assignedVehicle}`} vehicleId={assignedVehicle} refreshKey={historyRefreshKey} />
               </div>
             </div>
           </div>

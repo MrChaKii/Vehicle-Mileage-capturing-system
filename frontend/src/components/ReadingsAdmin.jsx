@@ -57,59 +57,51 @@ const Kilometers = ({ value, className = 'text-slate-900' }) => (
 );
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
+function downloadReadingsFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function exportToCSV(readings) {
   const headers = [
     'Date',
     'Vehicle',
     'Meter',
     'User',
+    'Reason',
+    'Before Mileage',
     'Mileage (km)',
     'Driven KM',
-    'Corrected',
-    'Original Mileage',
     'Submitted By',
   ];
-
-  const chronologicalReadings = [...readings].sort((left, right) => {
-    const vehicleComparison = String(left.vehicleId || '').localeCompare(String(right.vehicleId || ''));
-    if (vehicleComparison !== 0) return vehicleComparison;
-    return new Date(left.readingDate).getTime() - new Date(right.readingDate).getTime();
-  });
-  const previousMileageByVehicle = new Map();
-  const drivenKmByReadingId = new Map();
-
-  chronologicalReadings.forEach(reading => {
-    const previousMileage = previousMileageByVehicle.get(String(reading.vehicleId || ''));
-    const drivenKm = previousMileage == null
-      ? ''
-      : Number(reading.extractedMileage) - Number(previousMileage);
-    drivenKmByReadingId.set(reading._id, drivenKm);
-    previousMileageByVehicle.set(String(reading.vehicleId || ''), Number(reading.extractedMileage));
-  });
 
   const rows = readings.map(r => [
     new Date(r.readingDate).toLocaleString(),
     r.vehicleId,
     r.meterType ? `${r.isRental ? 'RENTAL ' : ''}${r.meterType.toUpperCase()}` : '',
     r.driverName ? `${r.driverName} (Driver)` : r.submittedByName || r.submittedBy,
+    r.reason ?? '',
+    r.beforeMileage ?? '',
     r.extractedMileage,
-    drivenKmByReadingId.get(r._id) ?? '',
-    r.isCorrected ? 'Yes' : 'No',
-    r.originalMileage ?? '',
+    r.mileageGap ?? '',
     r.submittedByName || 'Unknown User',
   ]);
 
   const csv = [headers, ...rows]
-    .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .map(row => row.map(cell => {
+      const value = String(cell);
+      // Spreadsheet apps can interpret exported free text as a formula.
+      const safeValue = typeof cell === 'string' && /^[\t\r\n]|^\s*[=+@-]/.test(value) ? "'" + value : value;
+      return `"${safeValue.replace(/"/g, '""')}"`;
+    }).join(','))
     .join('\r\n');
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `readings_export_${new Date().toISOString().slice(0, 10)}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadReadingsFile(blob, `readings_export_${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -126,7 +118,7 @@ const ReadingsAdmin = () => {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState('');
   const [editingReading, setEditingReading] = useState(null);
   const [editMileage, setEditMileage] = useState('');
   const [deletingReading, setDeletingReading] = useState(null);
@@ -300,14 +292,24 @@ const ReadingsAdmin = () => {
     }
   };
 
-  const handleExport = async () => {
-    setExporting(true);
+  const handleExport = async (format) => {
+    setExporting(format);
     try {
+      if (format === 'xlsx') {
+        const res = await api.get('/readings', {
+          params: { ...buildParams(1), format },
+          responseType: 'blob'
+        });
+        const filename = /filename="([^"]+)"/i.exec(res.headers['content-disposition'] || '')?.[1];
+        downloadReadingsFile(res.data, filename || 'mileage_readings.xlsx');
+        return;
+      }
+
       let allReadings = [];
       let currentPage = 1;
       let totalPages = 1;
       do {
-        const params = buildParams(currentPage);
+        const params = { ...buildParams(currentPage), includeMileageGap: 'true' };
         const res = await api.get('/readings', { params });
         allReadings = [...allReadings, ...res.data.readings];
         totalPages = res.data.pages;
@@ -317,7 +319,7 @@ const ReadingsAdmin = () => {
     } catch {
       alert('Export failed. Please try again.');
     } finally {
-      setExporting(false);
+      setExporting('');
     }
   };
 
@@ -360,7 +362,7 @@ const ReadingsAdmin = () => {
             Browse and filter all odometer readings across the fleet.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
           <button
             onClick={() => {
               fetchReadings(page);
@@ -372,18 +374,26 @@ const ReadingsAdmin = () => {
             <span className="ml-1.5">Refresh</span>
           </button>
           <button
-            onClick={handleExport}
-            disabled={exporting || total === 0}
-            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => handleExport('csv')}
+            disabled={Boolean(exporting) || total === 0}
+            className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
             title="Export filtered readings to CSV"
           >
-            {exporting ? (
+            {exporting === 'csv' ? 'Exporting CSV…' : 'Export CSV'}
+          </button>
+          <button
+            onClick={() => handleExport('xlsx')}
+            disabled={Boolean(exporting) || total === 0}
+            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export filtered readings to a formatted Excel workbook"
+          >
+            {exporting === 'xlsx' ? (
               <>
                 <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <span className="ml-1.5">Exporting…</span>
+                <span className="ml-1.5">Exporting Excel…</span>
               </>
             ) : (
               <>
@@ -395,7 +405,7 @@ const ReadingsAdmin = () => {
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                   />
                 </svg>
-                <span className="ml-1.5">Export CSV</span>
+                <span className="ml-1.5">Export Excel</span>
               </>
             )}
           </button>
@@ -704,6 +714,9 @@ const ReadingsAdmin = () => {
                   <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
                     User
                   </th>
+                  <th scope="col" className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
+                    Reason
+                  </th>
                   <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">
                     Mileage
                   </th>
@@ -760,6 +773,10 @@ const ReadingsAdmin = () => {
                     {/* User */}
                     <td className="px-4 py-3.5 text-sm text-slate-700 max-w-[10rem] truncate">
                       {reading.driverName ? `${reading.driverName} (Driver)` : reading.submittedByName || reading.submittedBy || <span className="text-slate-400">—</span>}
+                    </td>
+
+                    <td className="min-w-36 max-w-[18rem] whitespace-pre-wrap px-4 py-3.5 text-sm text-slate-700 [overflow-wrap:anywhere]">
+                      {reading.reason || <span className="text-slate-400">—</span>}
                     </td>
 
                     {/* Mileage */}

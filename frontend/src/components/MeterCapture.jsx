@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api';
 
-const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason, allowRental = false, onSaved }) => {
+const MeterCapture = ({
+  vehicleId, driverName, divisionId, divisionName, reason, allowRental = false,
+  poolTripAction, checkoutId, onSaved
+}) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const isMounted = useRef(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [cameraReady, setCameraReady] = useState(false);
@@ -19,6 +23,13 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
   const [rentalStatusLoading, setRentalStatusLoading] = useState(allowRental);
   const isCameraAvailable = typeof navigator !== 'undefined'
     && Boolean(navigator.mediaDevices?.getUserMedia);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!allowRental) return undefined;
@@ -148,6 +159,8 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
     data.append('divisionName', divisionName || '');
     data.append('reason', reason || '');
     data.append('isRental', String(rentalChecked));
+    if (poolTripAction) data.append('poolTripAction', poolTripAction);
+    if (checkoutId) data.append('checkoutId', checkoutId);
 
     try {
       if (navigator.geolocation) {
@@ -167,6 +180,7 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
       }
 
       const response = await api.post('/readings', data, { timeout: 30000 });
+      if (!isMounted.current) return;
       const meterType = response.data.reading?.meterType;
       const isRental = response.data.reading?.isRental;
       setSuccess(meterType ? `${isRental ? 'Rental ' : ''}${meterType.toUpperCase()} Reading Saved!` : 'Reading Saved!');
@@ -176,11 +190,15 @@ const MeterCapture = ({ vehicleId, driverName, divisionId, divisionName, reason,
         setRentalIsOpen(isOut);
         setRentalChecked(isOut);
       }
-      onSaved?.();
-      window.setTimeout(() => {
-        resetCapture();
-        setSuccess(false);
-      }, 2000);
+      onSaved?.(response.data);
+      if (!poolTripAction) {
+        window.setTimeout(() => {
+          if (isMounted.current) {
+            resetCapture();
+            setSuccess(false);
+          }
+        }, 2000);
+      }
     } catch (submitError) {
       setError(submitError.response?.data?.error || 'Failed to save reading and photo.');
     } finally {

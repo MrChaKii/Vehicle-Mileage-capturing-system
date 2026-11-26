@@ -8,6 +8,7 @@ const Division = require('../models/Division');
 const User = require('../models/User');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 const { uploadMeterPhoto, downloadMeterPhoto, deleteMeterPhoto } = require('../utils/cloudinary');
+const createReadingsWorkbook = require('../utils/readingsWorkbook');
 
 // Calendar date (YYYY-MM-DD) in Sri Lankan time.
 const getColomboDateKey = (value) => {
@@ -51,6 +52,22 @@ const upload = multer({
 });
 
 const MAX_POOL_IN_TO_OUT_GAP_KM = 1;
+const latestReadingOrder = { readingDate: -1, _id: -1 };
+const normalizeDriverName = (name) => (name || '').trim().toLowerCase();
+
+const getOpenVehicleReadings = (vehicleNumbers) => Reading.aggregate([
+  { $match: { vehicleId: { $in: vehicleNumbers } } },
+  { $sort: latestReadingOrder },
+  {
+    $group: {
+      _id: { vehicleId: '$vehicleId', isRental: { $eq: [{ $ifNull: ['$isRental', false] }, true] } },
+      latest: { $first: '$$ROOT' }
+    }
+  },
+  { $match: { 'latest.meterType': 'out' } },
+  { $replaceWith: '$latest' },
+  { $project: { vehicleId: 1, driverName: 1, division: 1, divisionName: 1, reason: 1, isRental: 1 } }
+]);
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -68,19 +85,59 @@ router.use(authenticate);
 // GET /api/readings/options — Return vehicles, company drivers, divisions, and users for driver login dropdowns
 router.get('/options', async (req, res) => {
   try {
-    const vehicleFilter = { status: 'active' };
-    if (req.user.role === 'driver') {
-      vehicleFilter.ownership = 'pool';
-    }
+    const isDriver = req.user.role === 'driver';
+    const vehicleFilter = isDriver ? { ownership: 'pool' } : { status: 'active' };
+    const loadUsers = async () => {
+      const userFilter = { role: 'user', isActive: true };
+      if (isDriver) {
+        const assignments = await Vehicle.find({ allocatedUser: { $ne: null } })
+          .select('allocatedUser ownership')
+          .lean();
+        const companyUserIds = assignments
+          .filter(vehicle => vehicle.ownership === 'company')
+          .map(vehicle => vehicle.allocatedUser);
+        const personalUserIds = assignments
+          .filter(vehicle => vehicle.ownership === 'personal')
+          .map(vehicle => vehicle.allocatedUser);
+        const assignedUserIds = assignments.map(vehicle => vehicle.allocatedUser);
+
+        userFilter._id = { $nin: personalUserIds };
+        userFilter.$or = [
+          { _id: { $in: companyUserIds } },
+          // Older accounts can have an assignment stored only on the user record.
+          { _id: { $nin: assignedUserIds }, vehicleId: { $in: ['', null] } }
+        ];
+      }
+      return User.find(userFilter).sort({ name: 1 }).select('name');
+    };
 
     const [vehicles, companyDrivers, divisions, users] = await Promise.all([
-      Vehicle.find(vehicleFilter).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership'),
+      Vehicle.find(vehicleFilter).sort({ vehicleNumber: 1 }).select('vehicleNumber make name model ownership status'),
       CompanyDriver.find().sort({ employeeName: 1 }).select('employeeId employeeName'),
       Division.find().sort({ name: 1 }).select('name'),
-      User.find({ role: 'user', isActive: true }).sort({ name: 1 }).select('name')
+      loadUsers()
     ]);
 
-    res.json({ vehicles, companyDrivers, divisions, users });
+    if (!isDriver) {
+      return res.json({ vehicles, companyDrivers, divisions, users });
+    }
+
+    const openReadings = await getOpenVehicleReadings(vehicles.map(vehicle => vehicle.vehicleNumber));
+    const unavailableVehicles = new Set(openReadings.map(reading => reading.vehicleId));
+    const rentalVehicles = new Set(openReadings.filter(reading => reading.isRental).map(reading => reading.vehicleId));
+    const poolTrips = openReadings.filter(reading => !reading.isRental);
+    const unavailablePeople = new Set(poolTrips.map(reading => normalizeDriverName(reading.driverName)));
+    const openTrips = poolTrips
+      .filter(reading => !rentalVehicles.has(reading.vehicleId))
+      .sort((left, right) => left.vehicleId.localeCompare(right.vehicleId));
+
+    res.json({
+      vehicles: vehicles.filter(vehicle => vehicle.status === 'active' && !unavailableVehicles.has(vehicle.vehicleNumber)),
+      companyDrivers: companyDrivers.filter(driver => !unavailablePeople.has(normalizeDriverName(driver.employeeName))),
+      users: users.filter(user => !unavailablePeople.has(normalizeDriverName(user.name))),
+      divisions,
+      openTrips
+    });
   } catch (error) {
     console.error('Options load error:', error);
     res.status(500).json({ error: 'Failed to load options' });
@@ -90,7 +147,7 @@ router.get('/options', async (req, res) => {
 // POST /api/readings — Save a manually entered reading with its camera photo
 router.post('/', uploadMeterImage, async (req, res) => {
   try {
-    const { vehicleId, mileage, location, driverName, division, divisionName, reason } = req.body;
+    const { vehicleId, mileage, location, driverName, division, divisionName, reason, poolTripAction, checkoutId } = req.body;
     const rentalRequested = req.body.isRental === 'true';
 
     if (!req.file) {
@@ -121,8 +178,8 @@ router.post('/', uploadMeterImage, async (req, res) => {
       Reading.findOne({
         vehicleId: normalizedVehicleId,
         isRental: { $ne: true }
-      }).sort({ readingDate: -1 }),
-      Reading.findOne({ vehicleId: normalizedVehicleId, isRental: true }).sort({ readingDate: -1 })
+      }).sort(latestReadingOrder),
+      Reading.findOne({ vehicleId: normalizedVehicleId, isRental: true }).sort(latestReadingOrder)
     ]);
 
     const rentalIsOpen = lastRentalReading?.meterType === 'out';
@@ -138,24 +195,46 @@ router.post('/', uploadMeterImage, async (req, res) => {
       });
     }
 
-    // Driver login on a pool vehicle: readings alternate between OUT and IN
+    const poolVehicle = !rentalRequested && req.user.role === 'driver'
+      ? await Vehicle.findOne({ vehicleNumber: normalizedVehicleId, ownership: 'pool' }).select('status')
+      : null;
+
+    if (poolTripAction && (!poolVehicle || !['out', 'in'].includes(poolTripAction))) {
+      return res.status(409).json({ error: 'This pool trip is no longer available. Refresh the driver workspace.' });
+    }
+
+    // Older clients infer OUT or IN. The workspace sends the intended action
+    // so an outdated selection cannot accidentally record the opposite action.
     let meterType = null;
     if (rentalRequested) {
       meterType = rentalIsOpen ? 'in' : 'out';
-    } else if (req.user.role === 'driver') {
-      const vehicle = await Vehicle.findOne({ vehicleNumber: vehicleId.toUpperCase().trim() }).select('ownership');
+    } else if (poolVehicle) {
+      const isVehicleOut = lastNormalReading?.meterType === 'out';
+      const personName = normalizeDriverName(driverName);
 
-      if (vehicle?.ownership === 'pool') {
-        const isVehicleOut = lastNormalReading?.meterType === 'out';
-        const isSamePerson = (lastNormalReading?.driverName || '').trim().toLowerCase() === (driverName || '').trim().toLowerCase();
+      if (poolTripAction === 'in' && (!isVehicleOut || lastNormalReading._id.toString() !== checkoutId)) {
+        return res.status(409).json({ error: 'This checkout has changed. Select the open trip again before recording a return.' });
+      }
+      if (poolTripAction === 'out' && isVehicleOut) {
+        return res.status(409).json({ error: 'This vehicle is already checked out. Select another vehicle or return the open trip.' });
+      }
+      if (isVehicleOut && normalizeDriverName(lastNormalReading.driverName) !== personName) {
+        return res.status(409).json({
+          error: `This vehicle is currently out with ${lastNormalReading.driverName}. Only they can return it.`
+        });
+      }
 
-        if (isVehicleOut && !isSamePerson) {
-          return res.status(409).json({
-            error: `This vehicle is currently out with ${lastNormalReading.driverName}. Only they can return it.`
-          });
+      meterType = isVehicleOut ? 'in' : 'out';
+      if (meterType === 'out') {
+        if (poolVehicle.status !== 'active' || !personName) {
+          return res.status(400).json({ error: 'Select an active pool vehicle and a driver or special user.' });
         }
 
-        meterType = isVehicleOut ? 'in' : 'out';
+        const poolVehicleNumbers = await Vehicle.distinct('vehicleNumber', { ownership: 'pool' });
+        const openReadings = await getOpenVehicleReadings(poolVehicleNumbers);
+        if (openReadings.some(reading => !reading.isRental && normalizeDriverName(reading.driverName) === personName)) {
+          return res.status(409).json({ error: 'This person already has an open trip. Record its IN reading before starting another trip.' });
+        }
       }
     }
 
@@ -219,10 +298,10 @@ router.post('/', uploadMeterImage, async (req, res) => {
       isCorrected: false,
       location: parsedLocation,
       submittedBy: req.user._id.toString(),
-      driverName: driverName || '',
-      division: division || null,
-      divisionName: divisionName || '',
-      reason: reason || '',
+      driverName: poolTripAction === 'in' ? lastNormalReading.driverName : driverName || '',
+      division: poolTripAction === 'in' ? lastNormalReading.division : division || null,
+      divisionName: poolTripAction === 'in' ? lastNormalReading.divisionName : divisionName || '',
+      reason: poolTripAction === 'in' ? lastNormalReading.reason : reason || '',
       meterType,
       isRental: rentalRequested
     });
@@ -260,7 +339,66 @@ router.post('/', uploadMeterImage, async (req, res) => {
   }
 });
 
-// GET /api/readings — All readings (admin, filterable + paginated)
+const getExportMileage = async (reading) => {
+  if (reading.meterType === 'out') {
+    return { beforeMileage: null, mileageGap: null };
+  }
+
+  const previousReading = await Reading.findOne({
+    vehicleId: reading.vehicleId,
+    isRental: reading.isRental === true ? true : { $ne: true },
+    ...(reading.meterType === 'in' && { meterType: { $in: ['out', 'in'] } }),
+    $or: [
+      { readingDate: { $lt: reading.readingDate } },
+      { readingDate: reading.readingDate, _id: { $lt: reading._id } }
+    ]
+  })
+    .sort(latestReadingOrder)
+    .select('extractedMileage meterType')
+    .lean();
+
+  if (!previousReading || (reading.meterType === 'in' && previousReading.meterType !== 'out')) {
+    return { beforeMileage: null, mileageGap: null };
+  }
+
+  return {
+    beforeMileage: previousReading.extractedMileage,
+    mileageGap: reading.extractedMileage - previousReading.extractedMileage
+  };
+};
+
+const formatAdminReadings = async (readings, includeMileageGap) => {
+  if (readings.length === 0) return [];
+
+  const submittedByValues = [...new Set(readings.map(reading => String(reading.submittedBy || '')).filter(Boolean))];
+  const objectIdValues = submittedByValues.filter(value => /^[a-f\d]{24}$/i.test(value));
+  const [users, exportMileage] = await Promise.all([
+    User.find({
+      $or: [
+        ...(objectIdValues.length ? [{ _id: { $in: objectIdValues } }] : []),
+        { username: { $in: submittedByValues } },
+        { employeeId: { $in: submittedByValues } }
+      ]
+    }).select('name username employeeId'),
+    includeMileageGap ? Promise.all(readings.map(getExportMileage)) : []
+  ]);
+  const userMap = new Map();
+  users.forEach(user => {
+    userMap.set(user._id.toString(), user);
+    if (user.username) userMap.set(user.username, user);
+    if (user.employeeId) userMap.set(user.employeeId, user);
+  });
+  return readings.map((reading, index) => {
+    const user = userMap.get(String(reading.submittedBy));
+    return {
+      ...reading.toObject(),
+      ...exportMileage[index],
+      submittedByName: user?.name || user?.username || 'Unknown User'
+    };
+  });
+};
+
+// GET /api/readings — Filtered admin readings. format=xlsx exports every matching row.
 router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
   try {
     const { vehicleId, driverName, userKey, startDate, endDate, ownership, month, page = 1 } = req.query;
@@ -306,6 +444,18 @@ router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
       }
     }
 
+    const readingsQuery = Reading.find(filter).sort(latestReadingOrder).select('-__v');
+    if (req.query.format === 'xlsx') {
+      const workbook = createReadingsWorkbook();
+      await readingsQuery.cursor().eachAsync(async batch => {
+        workbook.appendReadings(await formatAdminReadings(batch, true));
+      }, { batchSize: PAGE_SIZE });
+      const buffer = await workbook.writeBuffer();
+      const date = getColomboDateKey(new Date());
+      res.attachment(`mileage_readings_${date}.xlsx`);
+      return res.send(buffer);
+    }
+
     const skip = (parseInt(page, 10) - 1) * PAGE_SIZE;
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
@@ -314,11 +464,7 @@ router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
     const todayFilter = { readingDate: { $gte: todayStart, $lt: tomorrowStart } };
 
     const [readings, total, todayTotalReadings, allVehicleCount, regularUserCount, companyDriverCount, todayCorrectedRecords] = await Promise.all([
-      Reading.find(filter)
-        .sort({ readingDate: -1 })
-        .skip(skip)
-        .limit(PAGE_SIZE)
-        .select('-__v'),
+      readingsQuery.skip(skip).limit(PAGE_SIZE),
       Reading.countDocuments(filter),
       Reading.countDocuments(todayFilter),
       Vehicle.countDocuments(),
@@ -328,25 +474,7 @@ router.get('/', authorizeRoles(...ADMIN_ROLES), async (req, res) => {
     ]);
     const allUserCount = regularUserCount + companyDriverCount;
 
-    const submittedByValues = [...new Set(readings.map(reading => String(reading.submittedBy || '')).filter(Boolean))];
-    const objectIdValues = submittedByValues.filter(value => /^[a-f\d]{24}$/i.test(value));
-    const users = await User.find({
-      $or: [
-        ...(objectIdValues.length ? [{ _id: { $in: objectIdValues } }] : []),
-        { username: { $in: submittedByValues } },
-        { employeeId: { $in: submittedByValues } }
-      ]
-    }).select('name username employeeId');
-    const userMap = new Map();
-    users.forEach(user => {
-      userMap.set(user._id.toString(), user);
-      if (user.username) userMap.set(user.username, user);
-      if (user.employeeId) userMap.set(user.employeeId, user);
-    });
-    const readingsWithUserNames = readings.map(reading => ({
-      ...reading.toObject(),
-      submittedByName: userMap.get(String(reading.submittedBy))?.name || userMap.get(String(reading.submittedBy))?.username || 'Unknown User'
-    }));
+    const readingsWithUserNames = await formatAdminReadings(readings, req.query.includeMileageGap === 'true');
 
     res.json({
       readings: readingsWithUserNames,
@@ -407,68 +535,90 @@ router.get('/irregular-pool', authorizeRoles(...ADMIN_ROLES), async (req, res) =
   }
 });
 
+function* getCompletedTrips(readings) {
+  let outReading = null;
+
+  for (const reading of readings) {
+    if (reading.meterType === 'out') {
+      outReading = reading;
+    } else if (reading.meterType === 'in' && outReading) {
+      yield { outReading, inReading: reading };
+      outReading = null;
+    }
+  }
+}
+
 // GET /api/readings/stats/:vehicleId — Aggregated stats (must be BEFORE /:vehicleId)
 router.get('/stats/:vehicleId', async (req, res) => {
   try {
     const vehicleId = req.params.vehicleId.toUpperCase();
 
-    const [readings, vehicle] = await Promise.all([
-      Reading.find({ vehicleId, isRental: { $ne: true } })
-        .sort({ readingDate: 1 })
-        .select('extractedMileage readingDate meterType'),
+    const [history, vehicle] = await Promise.all([
+      Reading.find({ vehicleId })
+        .sort({ readingDate: 1, _id: 1 })
+        .select('extractedMileage readingDate meterType isRental')
+        .lean(),
       Vehicle.findOne({ vehicleNumber: vehicleId }).select('ownership')
     ]);
 
-    if (readings.length === 0) {
-      return res.json({ totalReadings: 0, totalDistance: 0, averageDaily: 0 });
+    const readings = history.filter(reading => reading.isRental !== true);
+    const rentalReadings = history.filter(reading => reading.isRental === true);
+    let rentalDistance = 0;
+    let completedRentalTrips = 0;
+
+    for (const { outReading, inReading } of getCompletedTrips(rentalReadings)) {
+      const distance = inReading.extractedMileage - outReading.extractedMileage;
+      if (Number.isFinite(distance) && distance >= 0) {
+        rentalDistance += distance;
+        completedRentalTrips += 1;
+      }
     }
 
     const totalReadings = readings.length;
-    const first = readings[0];
-    const last = readings[readings.length - 1];
-    let totalDistance = last.extractedMileage - first.extractedMileage;
-    let averageDaily;
+    let vehicleDistance = 0;
+    let averageDaily = 0;
 
     if (vehicle?.ownership === 'pool') {
       // Pool vehicles, per completed trip:
       // - total km adds up (IN meter - OUT meter)
       // - days used collects every calendar date from OUT to IN (inclusive); a same-day
       //   trip counts only if the vehicle moved. Each date is counted once.
-      totalDistance = 0;
       const usedDates = new Set();
-      let openOut = null;
 
-      readings.forEach(reading => {
-        if (reading.meterType === 'out') {
-          openOut = reading;
-        } else if (reading.meterType === 'in' && openOut) {
-          const tripDistance = reading.extractedMileage - openOut.extractedMileage;
-          totalDistance += Math.max(0, tripDistance);
+      for (const { outReading, inReading } of getCompletedTrips(readings)) {
+        const tripDistance = inReading.extractedMileage - outReading.extractedMileage;
+        vehicleDistance += Math.max(0, tripDistance);
 
-          const outDateKey = getColomboDateKey(new Date(openOut.readingDate));
-          const inDateKey = getColomboDateKey(new Date(reading.readingDate));
+        const outDateKey = getColomboDateKey(new Date(outReading.readingDate));
+        const inDateKey = getColomboDateKey(new Date(inReading.readingDate));
 
-          if (outDateKey !== inDateKey) {
-            getDateKeysBetween(outDateKey, inDateKey).forEach(dateKey => usedDates.add(dateKey));
-          } else if (tripDistance !== 0) {
-            usedDates.add(inDateKey);
-          }
-
-          openOut = null;
+        if (outDateKey !== inDateKey) {
+          getDateKeysBetween(outDateKey, inDateKey).forEach(dateKey => usedDates.add(dateKey));
+        } else if (tripDistance !== 0) {
+          usedDates.add(inDateKey);
         }
-      });
+      }
 
-      averageDaily = usedDates.size > 0 ? Math.round(totalDistance / usedDates.size) : 0;
-    } else {
+      averageDaily = usedDates.size > 0 ? Math.round(vehicleDistance / usedDates.size) : 0;
+    } else if (totalReadings > 1) {
+      const first = readings[0];
+      const last = readings[totalReadings - 1];
+      vehicleDistance = last.extractedMileage - first.extractedMileage;
       // Days between first and last reading (minimum 1 to avoid division by zero)
       const daysDiff = Math.max(
         1,
         Math.round((new Date(last.readingDate) - new Date(first.readingDate)) / (1000 * 60 * 60 * 24))
       );
-      averageDaily = totalReadings > 1 ? Math.round(totalDistance / daysDiff) : 0;
+      averageDaily = Math.round(vehicleDistance / daysDiff);
     }
 
-    res.json({ totalReadings, totalDistance: Math.max(0, totalDistance), averageDaily });
+    res.json({
+      totalReadings,
+      totalDistance: Math.max(0, vehicleDistance) + rentalDistance,
+      rentalDistance,
+      completedRentalTrips,
+      averageDaily
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
